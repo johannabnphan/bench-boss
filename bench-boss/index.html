@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bench Boss</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f6f3ea;          /* cream / chalk */
+    --card: #fffdf8;
+    --ink: #1c2b24;
+    --muted: #6f7d74;
+    --line: #e8e3d4;
+    --turf: #2b7a55;        /* soft turf green */
+    --turf-deep: #19513a;
+    --turf-light: #dcebe0;
+    --clay: #d9825b;        /* warm terracotta accent */
+    --clay-soft: #f6e2d6;
+    --gold: #e0b04a;
+    --bad: #c4503f;
+    --warn: #b7852a;
+    --shadow: 0 1px 2px rgba(28,43,36,.05), 0 8px 24px rgba(28,43,36,.06);
+    --radius: 18px;
+    --pos-QB: #d9825b; --pos-RB: #4f9a74; --pos-WR: #5a8fc0; --pos-TE: #d9a441;
+    --pos-FLEX: #8d7bc4; --pos-K: #9a9a9a; --pos-DEF: #7a8a96;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1713; --card: #15221c; --ink: #eef3ee; --muted: #93a39a; --line: #243229;
+      --turf: #3d9a6f; --turf-deep: #0f3a29; --turf-light: #1e3a2d;
+      --clay: #ee9a73; --clay-soft: #3a2a22; --shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 'Plus Jakarta Sans', system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 72px; }
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); }
+
+  /* ---------- top bar ---------- */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; letter-spacing: -.01em; }
+  .brand svg { width: 34px; height: 34px; flex: none; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line);
+          border-radius: 999px; padding: 6px 8px 6px 14px; font-weight: 600; font-size: 14px; box-shadow: var(--shadow); }
+  .chip button { border: 0; background: var(--turf-light); color: var(--turf-deep); border-radius: 999px;
+                 padding: 4px 10px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+
+  /* ---------- hero / connect ---------- */
+  .hero { position: relative; overflow: hidden; border-radius: 26px; padding: 34px 26px 30px; color: #fff;
+          background:
+            repeating-linear-gradient(90deg, rgba(255,255,255,.05) 0 2px, transparent 2px 64px),
+            linear-gradient(135deg, var(--turf) 0%, var(--turf-deep) 100%);
+          box-shadow: var(--shadow); }
+  .hero::after { content: ""; position: absolute; right: -70px; top: -70px; width: 240px; height: 240px; border-radius: 50%;
+                 border: 2px solid rgba(255,255,255,.14); box-shadow: 0 0 0 26px rgba(255,255,255,.04); }
+  .hero h1 { font-size: clamp(26px, 5vw, 38px); line-height: 1.1; margin: 0 0 8px; letter-spacing: -.02em; font-weight: 800; position: relative; }
+  .hero p { margin: 0 0 20px; color: rgba(255,255,255,.82); max-width: 480px; position: relative; }
+  .hero form { display: flex; gap: 8px; flex-wrap: wrap; max-width: 460px; position: relative; }
+  .hero input { flex: 1 1 200px; border: 0; border-radius: 14px; padding: 14px 16px; font: inherit; background: #fff; color: #1c2b24; }
+  .hero input:focus { outline: 3px solid var(--gold); }
+  .btn { border: 0; border-radius: 14px; padding: 14px 20px; font: inherit; font-weight: 700; cursor: pointer;
+         background: var(--clay); color: #fff; transition: transform .12s ease, filter .12s ease; }
+  .btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
+  .btn:disabled { opacity: .65; cursor: wait; transform: none; }
+  #status { margin: 12px 0 0; min-height: 20px; font-size: 14px; color: rgba(255,255,255,.85); position: relative; }
+  #status.err { color: #ffd7cf; font-weight: 600; }
+
+  /* ---------- league tabs ---------- */
+  .tabs { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; margin: 18px 0 6px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px;
+         padding: 9px 16px; font: inherit; font-weight: 600; font-size: 14px; cursor: pointer; transition: all .15s ease; }
+  .tab small { color: var(--muted); font-weight: 500; margin-left: 6px; }
+  .tab:hover { border-color: var(--turf); }
+  .tab.active { background: var(--turf); border-color: var(--turf); color: #fff; box-shadow: var(--shadow); }
+  .tab.active small { color: rgba(255,255,255,.75); }
+
+  /* ---------- scoreboard ---------- */
+  .score-card { position: relative; overflow: hidden; border-radius: 24px; padding: 18px 20px 22px; color: #fff; margin-top: 6px;
+                background:
+                  repeating-linear-gradient(90deg, rgba(255,255,255,.05) 0 2px, transparent 2px 56px),
+                  linear-gradient(160deg, var(--turf) 0%, var(--turf-deep) 100%);
+                box-shadow: var(--shadow); }
+  .wk { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 14px; }
+  .wk button { width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.1);
+               color: #fff; font-size: 16px; cursor: pointer; }
+  .wk button:disabled { opacity: .3; cursor: default; }
+  .wk span { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 17px; letter-spacing: .12em; text-transform: uppercase; min-width: 90px; text-align: center; }
+  .versus { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; text-align: center; }
+  .team .nm { font-weight: 700; font-size: 15px; opacity: .92; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .team .rec { font-size: 12px; opacity: .7; }
+  .team .pts { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: clamp(44px, 10vw, 68px); line-height: 1.05; }
+  .team.lead .pts { color: var(--gold); }
+  .vs { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; letter-spacing: .1em; opacity: .6; }
+  .facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
+  .fact { background: rgba(255,255,255,.12); border-radius: 999px; padding: 5px 12px; font-size: 12.5px; font-weight: 600; }
+  .nomatch { text-align: center; opacity: .9; padding: 8px 0; }
+
+  /* ---------- lineups ---------- */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 16px 8px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .card h2 { margin: 0 0 6px; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; color: var(--muted);
+             display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .card h2 .who { color: var(--ink); text-transform: none; letter-spacing: 0; font-size: 15px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li.player { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+  li.player:first-child { border-top: 0; }
+  .pos { flex: none; width: 42px; text-align: center; font-size: 11px; font-weight: 800; letter-spacing: .04em; color: #fff;
+         border-radius: 9px; padding: 5px 0; background: var(--c, var(--muted)); }
+  .pname { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pname small { display: block; color: var(--muted); font-weight: 500; font-size: 12.5px; }
+  .score { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 48px; text-align: right; }
+  .tag { font-size: 10.5px; font-weight: 800; padding: 3px 7px; border-radius: 7px; letter-spacing: .03em; }
+  .tag.out { background: #f8dcd6; color: var(--bad); }
+  .tag.q { background: #f7e9c8; color: var(--warn); }
+  @media (prefers-color-scheme: dark) { .tag.out { background: #4a2a25; } .tag.q { background: #44371c; } }
+  details.fold { margin: 4px 0 10px; border-top: 1px dashed var(--line); }
+  details.fold summary { cursor: pointer; list-style: none; padding: 12px 0 6px; font-size: 13px; font-weight: 800;
+                         text-transform: uppercase; letter-spacing: .09em; color: var(--muted); display: flex; justify-content: space-between; }
+  details.fold summary::-webkit-details-marker { display: none; }
+  details.fold summary::after { content: "＋"; color: var(--turf); }
+  details.fold[open] summary::after { content: "－"; }
+
+  /* ---------- loading ---------- */
+  .skel { height: 140px; border-radius: 24px; background: linear-gradient(90deg, var(--line), var(--card), var(--line));
+          background-size: 200% 100%; animation: sh 1.2s infinite linear; margin-top: 6px; }
+  @keyframes sh { to { background-position: -200% 0; } }
+  .errbox { background: var(--clay-soft); color: var(--bad); border-radius: 14px; padding: 14px 16px; font-weight: 600; margin-top: 12px; }
+
+  .foot { text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 32px; }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 48 48" aria-hidden="true">
+        <ellipse cx="24" cy="24" rx="21" ry="13" transform="rotate(-35 24 24)" fill="#c9784f"/>
+        <ellipse cx="24" cy="24" rx="21" ry="13" transform="rotate(-35 24 24)" fill="none" stroke="#a65d38" stroke-width="2"/>
+        <path d="M14 33 L34 15" stroke="#fffdf8" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M19 30 l3 3 M23 26.5 l3 3 M27 23 l3 3 M20.5 21 l3 -3 M24.5 24.5 l3 -3 M28.5 28 l3 -3" stroke="#fffdf8" stroke-width="2" stroke-linecap="round" opacity="0"/>
+        <g stroke="#fffdf8" stroke-width="2" stroke-linecap="round">
+          <path d="M20 26 l-2.5 2.5"/><path d="M24 22 l-2.5 2.5"/><path d="M28 18 l-2.5 2.5"/>
+        </g>
+      </svg>
+      <span>Bench Boss</span>
+    </div>
+    <div id="userChip" class="chip hidden"><span id="userName"></span><button id="switchBtn" type="button">Switch</button></div>
+  </header>
+
+  <section id="connect" class="hero">
+    <h1>Know your matchup<br>before kickoff.</h1>
+    <p>Connect your Sleeper account to see your roster, your opponent, and this week's game at a glance.</p>
+    <form id="userForm">
+      <input id="username" placeholder="Your Sleeper username" autocomplete="off" required>
+      <button id="goBtn" class="btn" type="submit">Let's go</button>
+    </form>
+    <p id="status"></p>
+  </section>
+
+  <nav id="tabs" class="tabs hidden" aria-label="Your leagues"></nav>
+  <section id="leagueView" class="hidden"></section>
+
+  <p class="foot">Built for fun · Data from the Sleeper API · Not affiliated with Sleeper or the NFL</p>
+</main>
+
+<script>
+const API = 'https://api.sleeper.app/v1';
+const $ = (id) => document.getElementById(id);
+const state = { user: null, nfl: null, players: null, leagues: [], leagueId: null, week: null };
+
+// ---------- helpers ----------
+function el(tag, props = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else if (k === 'style') n.setAttribute('style', v);
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else if (v === true) n.setAttribute(k, '');
+    else if (v !== false && v != null) n.setAttribute(k, v);
+  }
+  kids.flat().forEach((c) => c != null && n.append(c));
+  return n;
+}
+function setStatus(msg, isErr = false) { const s = $('status'); s.textContent = msg; s.className = isErr ? 'err' : ''; }
+async function get(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(`Sleeper returned ${r.status} for ${path}`);
+  return r.json();
+}
+function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function load(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+const fmt = (n) => (typeof n === 'number' ? n.toFixed(2) : '0.00');
+
+async function getPlayers() {
+  if (state.players) return state.players;
+  const cached = load('bb_players_v1');
+  if (cached && Date.now() - cached.t < 24 * 3600 * 1000) return (state.players = cached.data);
+  const raw = await get('/players/nfl');
+  const slim = {};
+  for (const [id, p] of Object.entries(raw)) {
+    slim[id] = {
+      n: p.position === 'DEF' ? `${p.first_name} ${p.last_name}` : (p.full_name || `${p.first_name || ''} ${p.last_name || ''}`.trim()),
+      p: p.position, t: p.team, i: p.injury_status, s: p.status,
+    };
+  }
+  store('bb_players_v1', { t: Date.now(), data: slim });
+  return (state.players = slim);
+}
+
+// ---------- connect flow ----------
+$('userForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('username').value.trim();
+  if (!name) return;
+  $('goBtn').disabled = true;
+  try {
+    setStatus('Looking up your account…');
+    const user = await get('/user/' + encodeURIComponent(name));
+    if (!user || !user.user_id) throw new Error("We couldn't find that Sleeper username.");
+    state.user = user; store('bb_username', name);
+    state.nfl = await get('/state/nfl');
+    setStatus('Finding your leagues…');
+    state.leagues = await get(`/user/${user.user_id}/leagues/nfl/${state.nfl.season}`);
+    if (!state.leagues.length) throw new Error(`No ${state.nfl.season} NFL leagues found for ${user.display_name}.`);
+    state.week = state.nfl.display_week || state.nfl.week || 1;
+    enterApp();
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally { $('goBtn').disabled = false; }
+});
+
+function enterApp() {
+  setStatus('');
+  $('connect').classList.add('hidden');
+  $('userName').textContent = state.user.display_name;
+  $('userChip').classList.remove('hidden');
+  renderTabs();
+  openLeague(state.leagues[0].league_id);
+}
+$('switchBtn').addEventListener('click', () => {
+  $('connect').classList.remove('hidden');
+  ['tabs', 'leagueView', 'userChip'].forEach((id) => $(id).classList.add('hidden'));
+  $('username').focus();
+});
+
+function renderTabs() {
+  const box = $('tabs'); box.replaceChildren();
+  state.leagues.forEach((lg) => box.append(el('button', {
+    class: 'tab' + (lg.league_id === state.leagueId ? ' active' : ''), type: 'button',
+    onclick: () => openLeague(lg.league_id),
+  }, lg.name, el('small', { text: lg.total_rosters + ' teams' }))));
+  box.classList.toggle('hidden', state.leagues.length < 2);
+}
+
+// ---------- league view ----------
+async function openLeague(leagueId, week) {
+  state.leagueId = leagueId;
+  if (week) state.week = week;
+  renderTabs();
+  const view = $('leagueView');
+  view.classList.remove('hidden');
+  view.replaceChildren(el('div', { class: 'skel' }), el('div', { class: 'skel', style: 'height:260px' }));
+  try {
+    const [league, rosters, users, matchups, players] = await Promise.all([
+      get(`/league/${leagueId}`), get(`/league/${leagueId}/rosters`),
+      get(`/league/${leagueId}/users`), get(`/league/${leagueId}/matchups/${state.week}`),
+      getPlayers(),
+    ]);
+    if (leagueId !== state.leagueId) return; // user switched tabs while loading
+    renderLeague({ league, rosters, users, matchups, players });
+  } catch (err) {
+    view.replaceChildren(el('div', { class: 'errbox', text: err.message }));
+  }
+}
+
+const teamName = (roster, users) => {
+  const u = users.find((x) => x.user_id === roster.owner_id);
+  return (u && (u.metadata?.team_name || u.display_name)) || `Team ${roster.roster_id}`;
+};
+const record = (r) => `${r.settings.wins}-${r.settings.losses}${r.settings.ties ? '-' + r.settings.ties : ''}`;
+const scoringLabel = (s) => ((s.rec ?? 0) >= 1 ? 'Full PPR' : (s.rec ?? 0) >= 0.5 ? 'Half PPR' : 'Standard');
+
+function playerRow(id, slot, players, pts) {
+  const p = players[id] || { n: id === '0' ? 'Empty slot' : `Player ${id}`, p: '', t: '' };
+  const label = slot || p.p || '—';
+  const key = label === 'SUPER_FLEX' || label === 'REC_FLEX' || label === 'WRRB_FLEX' ? 'FLEX' : label;
+  const inj = p.i ? el('span', { class: 'tag ' + (/out|ir|pup|sus/i.test(p.i) ? 'out' : 'q'), text: p.i }) : null;
+  return el('li', { class: 'player' },
+    el('span', { class: 'pos', style: `--c: var(--pos-${key}, var(--muted))`, text: label === 'SUPER_FLEX' ? 'SF' : label }),
+    el('span', { class: 'pname' }, p.n, el('small', { text: [p.p, p.t || 'FA'].filter(Boolean).join(' · ') })),
+    inj,
+    pts == null ? null : el('span', { class: 'score', text: fmt(pts) }));
+}
+
+function lineupCards(title, roster, m, slots, players) {
+  const starters = m?.starters || roster.starters || [];
+  const ptsOf = (id) => (m?.players_points ? (m.players_points[id] ?? 0) : null);
+  const all = m?.players || roster.players || [];
+  const bench = all.filter((id) => !starters.includes(id) && !(roster.reserve || []).includes(id) && !(roster.taxi || []).includes(id));
+  const card = el('div', { class: 'card' },
+    el('h2', {}, el('span', { class: 'who', text: title }), el('span', { text: 'Starters' })),
+    el('ul', {}, starters.map((id, i) => playerRow(id, slots[i], players, ptsOf(id)))),
+    el('details', { class: 'fold' }, el('summary', { text: `Bench · ${bench.length}` }),
+      el('ul', {}, bench.map((id) => playerRow(id, '', players, ptsOf(id))))));
+  if ((roster.reserve || []).length) {
+    card.append(el('details', { class: 'fold' }, el('summary', { text: `Injured reserve · ${roster.reserve.length}` }),
+      el('ul', {}, roster.reserve.map((id) => playerRow(id, 'IR', players, null)))));
+  }
+  return card;
+}
+
+function renderLeague({ league, rosters, users, matchups, players }) {
+  const view = $('leagueView'); view.replaceChildren();
+  const week = state.week;
+  const mine = rosters.find((r) => r.owner_id === state.user.user_id);
+  if (!mine) { view.append(el('div', { class: 'errbox', text: 'Could not find your roster in this league.' })); return; }
+
+  const myM = matchups.find((m) => m.roster_id === mine.roster_id);
+  const oppM = myM && matchups.find((m) => m.matchup_id === myM.matchup_id && m.roster_id !== mine.roster_id);
+  const opp = oppM && rosters.find((r) => r.roster_id === oppM.roster_id);
+  const slots = league.roster_positions.filter((p) => p !== 'BN');
+
+  // scoreboard
+  const wk = el('div', { class: 'wk' },
+    el('button', { type: 'button', 'aria-label': 'Previous week', text: '‹', disabled: week <= 1, onclick: () => openLeague(league.league_id, week - 1) }),
+    el('span', { text: `Week ${week}` }),
+    el('button', { type: 'button', 'aria-label': 'Next week', text: '›', disabled: week >= 18, onclick: () => openLeague(league.league_id, week + 1) }));
+  const score = el('div', { class: 'score-card' }, wk);
+  if (opp) {
+    const a = myM.points || 0, b = oppM.points || 0;
+    score.append(el('div', { class: 'versus' },
+      el('div', { class: 'team' + (a > b ? ' lead' : '') }, el('div', { class: 'nm', text: teamName(mine, users) }), el('div', { class: 'pts', text: fmt(a) }), el('div', { class: 'rec', text: record(mine) })),
+      el('div', { class: 'vs', text: 'VS' }),
+      el('div', { class: 'team' + (b > a ? ' lead' : '') }, el('div', { class: 'nm', text: teamName(opp, users) }), el('div', { class: 'pts', text: fmt(b) }), el('div', { class: 'rec', text: record(opp) }))));
+  } else {
+    score.append(el('div', { class: 'nomatch', text: 'No head-to-head matchup this week (bye, playoffs, or the season hasn’t started).' }));
+  }
+  score.append(el('div', { class: 'facts' },
+    el('span', { class: 'fact', text: scoringLabel(league.scoring_settings || {}) }),
+    el('span', { class: 'fact', text: slots.join(' · ') })));
+  view.append(score);
+
+  // lineups
+  const cols = el('div', { class: 'cols' }, lineupCards('Your team', mine, myM, slots, players));
+  if (opp) cols.append(lineupCards(teamName(opp, users), opp, oppM, slots, players));
+  view.append(cols);
+}
+
+const saved = load('bb_username');
+if (saved) $('username').value = saved;
+</script>
+</body>
+</html>
