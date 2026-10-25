@@ -232,6 +232,13 @@
   .tp-n { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
   .tp-b { font-size: 11px; color: var(--forest); }
   .seg-sm { margin-bottom: 14px; }
+  .gd-card { padding-top: 6px; padding-bottom: 8px; }
+  .gd-sec { margin-top: 12px; }
+  .gd-sec + .gd-sec { border-top: 1px solid var(--line); padding-top: 12px; }
+  .gd-row { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: start; padding: 5px 0; font-size: 13.5px; }
+  .gd-k .sc { display: inline-block; }
+  .gd-sec .pm { margin: 6px 0 0; font-size: 12.5px; }
+  @media (max-width: 640px) { .gd-row { grid-template-columns: 1fr; gap: 3px; } }
   .seg-sm .seg-b { font-size: 13px; padding: 7px 13px; }
   .tpick .tp-v { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
   @media (max-width: 640px) { .seg { width: 100%; } .seg-b { flex: 1; padding: 8px 6px; font-size: 13px; } }
@@ -1451,12 +1458,46 @@ const bonusTxt = (p) => (p.bonus >= 0.1 ? ` (incl. +${f1(p.bonus)} bonus)` : '')
 const lineupValue = (slots, pool) => { const l = fill(slots, pool, slots.map(() => null), (p) => p.mean); return { l, v: totals(l).mu }; };
 const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th');
 
+// Plain-language guide to every label on the Trades page.
+function tradeGuide() {
+  const row = (chip, text) => el('div', { class: 'gd-row' }, el('div', { class: 'gd-k' }, chip), el('div', { class: 'gd-t', text }));
+  const sc = (cls, text) => el('span', { class: 'sc ' + cls, text });
+  const sec = (title, ...rows) => el('div', { class: 'gd-sec' }, el('div', { class: 'label', text: title }), ...rows);
+  const body = el('div', { class: 'guide' },
+    sec('Schedule',
+      row(sc('good', 'Easy schedule'), '60 or more out of 100. Mostly facing defenses that give up lots of points to that position, so a better chance of big weeks.'),
+      row(sc('', 'Avg schedule'), '40–59. A mix of soft and tough opponents.'),
+      row(sc('bad', 'Tough schedule'), 'Under 40. Mostly facing defenses that shut that position down, so scoring will be harder.'),
+      row(sc('', '2 byes left'), "Weeks the player's NFL team doesn't play. They count as 0 points in the weekly average."),
+      el('p', { class: 'pm', text: "Defenses are rated by fantasy points allowed per game to each position this season, in your league's scoring. Judged by position: a running back only by how defenses do against running backs. Hover or long-press the chip for the exact score." })),
+    sec('Value',
+      row(sc('val gA', '85 · A'), 'A: 85–100. A top option at the position.'),
+      row(sc('val gB', '75 · B'), 'B: 72–84. A solid starter.'),
+      row(sc('val gC', '62 · C'), 'C: 58–71. A fringe starter or strong backup.'),
+      row(sc('val gD', '48 · D'), 'D/F: under 58. Depth, or someone who rarely helps.'),
+      el('p', { class: 'pm', text: 'Value (0–100) blends: projection rank at the position over the chosen weeks (55%), snap share (15%), start % (15%), how closely Sleeper and ESPN agree (10%) and add/drop trend (5%).' })),
+    sec('Points',
+      row(sc('', '13.9/wk'), 'Average projected points per week over the chosen weeks, in your scoring (Sleeper projections, adjusted for opponents from 2 weeks out, at most ±20%).'),
+      row(sc('good', '+1.2 bonus/wk'), "The part of those points expected from your league's bonuses (100-yard games, TE premium, long TDs, first downs…)."),
+      row(sc('good', 'You +3.0/wk'), "How much your best possible starting lineup gains (or loses) per week after the trade. The other team's number is the same for them."),
+      row(sc('', 'Value: give 150, get 162'), 'Total value of the players on each side. Useful for judging fairness; lineup change matters more for winning.')),
+    sec('Your team',
+      row(sc('good', '1st'), 'Your rank at that position against every team in your league (starters, plus a little credit for your best backup). Green = top third.'),
+      row(sc('bad', '10th'), 'Red = bottom part of the league. These show up as Needs, and trade ideas target them.'),
+      row(sc('', 'Trade ideas'), "One-for-one trades that fill a need from your extras and also help the other team, so they're realistic offers.")),
+    sec('Weeks',
+      row(sc('', 'Rest of season'), 'From this week through the end of your fantasy season. Best for long-term trades.'),
+      row(sc('', 'Fantasy playoffs'), "Only your league's playoff weeks (from league settings). For building a title team."),
+      row(sc('', 'Next 4 weeks'), 'Short-term view, e.g. to cover injuries or byes.')));
+  return el('div', { class: 'card gd-card' }, fold('tradeGuide', 'What these mean', body, true));
+}
+
 function teamAnalyzer(d, { slots, mine }) {
   const box = el('div');
   // Horizon switch
   const hz = el('div', { class: 'seg seg-sm' }, Object.entries(HORIZONS).map(([k, label]) => el('button', { type: 'button', class: 'seg-b' + (state.horizon === k ? ' on' : ''), 'aria-pressed': String(state.horizon === k), text: label,
     onclick: () => { if (state.horizon === k) return; state.horizon = k; store('bb_horizon', k); render(state.data); } })));
-  box.append(hz);
+  box.append(hz, tradeGuide());
   const weeks = horizonWeeks(d);
   if (!weeks.length) { box.append(el('div', { class: 'card pm', text: 'No weeks left in this horizon. Try Rest of season.' })); return box; }
   loadDefense(d);                                   // schedule adjustment; re-renders when ready
