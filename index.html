@@ -9,11 +9,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #ffffff;
-    --card: #ffffff;
+    --bg: #f8f3e9;             /* cream */
+    --card: #fffdf8;           /* off-white */
     --ink: #2e2219;             /* dark brown text */
     --muted: #8a7a6c;
-    --line: #eee6dd;
+    --line: #ebe2d4;
     --brown: #7a4f2e;
     --brown-soft: #f7f0e8;
     --forest: #3f9a45;          /* grass green: actions and positives */
@@ -169,6 +169,19 @@
     .hwhy, .hrow.solo .hwhy { grid-column: 1 / -1; }
     .hrow.swap { margin: 0 -18px; padding: 14px 18px; }
     .slot { font-size: 10px; }
+  }
+
+  /* bench, both teams */
+  .bcols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
+  .bcols.solo { grid-template-columns: 1fr; }
+  .bcol + .bcol { border-left: 1px solid var(--line); padding-left: 28px; }
+  .bhead { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0 8px; font-size: 13px; }
+  .bhead b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bhead span { color: var(--muted); flex: none; }
+  .bcol .row { grid-template-columns: 44px 1fr auto; gap: 12px; }
+  @media (max-width: 640px) {
+    .bcols { grid-template-columns: 1fr; }
+    .bcol + .bcol { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); margin-top: 10px; padding-top: 12px; }
   }
 
   /* watch */
@@ -1013,7 +1026,12 @@ function render(d) {
   // ----- bench / opponent / how it works -----
   const startIds = new Set(rec.lineup.filter(Boolean).map((p) => p.id));
   const bench = pool.filter((p) => !startIds.has(p.id)).sort((a, b) => b.mean - a.mean);
-  const benchCard = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Bench' }), el('span', { class: 'label', text: `${bench.length} players` })));
+  // Their bench: rostered players not in their lineup (IR/taxi excluded, like yours).
+  const oppStartIds = new Set((oppLineup || []).filter(Boolean).map((p) => p.id));
+  const oppBench = oppR ? (oppM?.players || oppR.players || []).filter((id) => !oppStartIds.has(id) && !(oppR.reserve || []).includes(id) && !(oppR.taxi || []).includes(id))
+    .map((id) => ev(id, ctxOpp)).filter(Boolean).sort((a, b) => b.mean - a.mean) : [];
+  const myCol = el('div', { class: 'bcol' }, el('div', { class: 'bhead' }, el('b', { text: oppR ? teamName(mine, users) : 'Your bench' }), el('span', { text: `${bench.length} player${bench.length === 1 ? '' : 's'}` })));
+  const benchCard = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Bench' }), el('span', { class: 'label', text: oppR ? 'Both teams' : `${bench.length} players` })));
   bench.forEach((p, i) => {
     const sg = suggestBench(p, { rec, slots, displaced });
     const meta = [p.pos, p.team || 'FA', p.opp ? 'vs ' + p.opp : null, p.tag && p.body && !p.bye ? p.body : null, p.started ? p.gameDetail : null].filter(Boolean).join(' · ');
@@ -1024,8 +1042,26 @@ function render(d) {
       el('div', { class: 'why' }, sg.text));
     if (!p.started && !p.unavailable) [srcNote(p, !!espn), crowdNote(p), scriptNote(p)].forEach((t) => t && left.append(el('div', { class: 'pm', text: t })));
     const right = scoreCell(p);
-    benchCard.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') }, el('span', { class: 'slot', text: p.pos || '-' }), left, right));
+    myCol.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') }, el('span', { class: 'slot', text: p.pos || '-' }), left, right));
   });
+  if (!bench.length) myCol.append(el('div', { class: 'pm', style: 'padding:10px 0', text: 'No bench players.' }));
+  const cols = el('div', { class: 'bcols' + (oppR ? '' : ' solo') }, myCol);
+  if (oppR) {
+    const theirCol = el('div', { class: 'bcol' }, el('div', { class: 'bhead' }, el('b', { text: teamName(oppR, users) }), el('span', { text: `${oppBench.length} player${oppBench.length === 1 ? '' : 's'}` })));
+    oppBench.forEach((p, i) => {
+      // Flag a bench player who projects more than one of their starters at an eligible slot.
+      const worse = (oppLineup || []).some((o, j) => o && !o.started && !p.started && !p.unavailable && ELIG[slots[j]]?.includes(p.pos) && p.mean > o.mean + 1);
+      theirCol.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') }, el('span', { class: 'slot', text: p.pos || '-' }),
+        el('div', {},
+          el('div', { class: 'pn' }, p.name, p.final ? null : statusBadge(p)),
+          el('div', { class: 'pm', text: metaOf(p) }),
+          worse ? el('div', { class: 'why', text: 'Projects more than one of their starters. Watch for a lineup change.' }) : null),
+        scoreCell(p)));
+    });
+    if (!oppBench.length) theirCol.append(el('div', { class: 'pm', style: 'padding:10px 0', text: 'No bench players.' }));
+    cols.append(theirCol);
+  }
+  benchCard.append(cols);
   view.append(benchCard);
   const lower = el('div', { class: 'card' });
   lower.append(fold('how', 'How this works', el('div', { class: 'how' },
