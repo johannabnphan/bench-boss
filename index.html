@@ -202,6 +202,13 @@
   .stand.you .nm { color: var(--forest); }
   @media (max-width: 640px) { .lg-row { grid-template-columns: 1fr 38px 1fr; gap: 6px; } .lg-big { font-size: 26px; } .stand .pf { display: none; } }
 
+  /* entry: pick your team after entering a league */
+  #teamPick { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; max-width: 600px; }
+  .pick { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 14px; padding: 12px 14px; font: inherit; }
+  .pick:hover { border-color: var(--forest-2); }
+  .pick span { font-size: 12.5px; color: var(--muted); }
+  .hero input + input { flex-basis: 160px; }
+
   /* team analyzer + trades */
   .hdr-r { display: flex; align-items: center; gap: 8px; }
   #tradesBtn { padding: 7px 14px; font-size: 13px; background: var(--card); color: var(--brown); }
@@ -318,12 +325,14 @@
   <section id="connect" class="hero">
     <div class="eyebrow">Fantasy football · Sleeper</div>
     <h1>The lineup that beats this week's opponent.</h1>
-    <p>Connect your Sleeper account. Bench Boss reads your league's scoring, your roster, and your matchup, then recommends who to start and keeps your win chance up to date during games.</p>
+    <p>Enter your Sleeper username (add a league name to jump straight to it), or paste a league link or ID. Bench Boss reads your league's scoring, your roster, and your matchup, then recommends who to start and keeps your win chance up to date during games.</p>
     <form id="userForm">
-      <input id="username" placeholder="Your Sleeper username" autocomplete="off" required>
+      <input id="username" placeholder="Sleeper username, league ID or league link" autocomplete="off" required>
+      <input id="leagueName" placeholder="League name (optional)" autocomplete="off">
       <button id="goBtn" class="btn" type="submit">Continue</button>
     </form>
     <p id="status"></p>
+    <div id="teamPick" class="hidden"></div>
   </section>
 
   <nav id="tabs" class="tabs hidden" aria-label="Your leagues"></nav>
@@ -678,12 +687,44 @@ function explain(inp, out, ctx) {
 }
 
 // ---------------- connect flow ----------------
+// A league link (sleeper.com/leagues/<id>/...) or a bare league ID (Sleeper IDs are long numbers).
+const leagueIdFrom = (v) => (/leagues\/(\d{6,})/.exec(v) || /^(\d{9,})$/.exec(v))?.[1] || null;
+const norm = (v) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Entered a league instead of a username: list its teams so you can pick yours.
+async function startFromLeague(id) {
+  setStatus('Opening that league…');
+  const [league, users, rosters] = await Promise.all([get('/league/' + id), get(`/league/${id}/users`), get(`/league/${id}/rosters`)]);
+  if (!league) throw new Error("We couldn't find that league. Check the ID or link.");
+  state.nfl = await get('/state/nfl');
+  setStatus(`${league.name}: which team is yours?`);
+  const box = $('teamPick'); box.classList.remove('hidden');
+  box.replaceChildren(...rosters.filter((r) => r.owner_id).map((r) => {
+    const u = users.find((x) => x.user_id === r.owner_id) || {};
+    return el('button', { type: 'button', class: 'pick', onclick: async () => {
+      try {
+        box.classList.add('hidden');
+        state.user = { user_id: r.owner_id, display_name: u.display_name || teamName(r, users) };
+        if (u.display_name) store('bb_username', u.display_name);
+        setStatus('Finding your leagues…');
+        const all = await get(`/user/${r.owner_id}/leagues/nfl/${league.season || state.nfl.season}`).catch(() => []);
+        state.leagues = [league, ...(all || []).filter((l) => l.league_id !== league.league_id)];   // the league you entered opens first
+        state.week = state.nfl.display_week || state.nfl.week || 1;
+        enterApp();
+      } catch (err) { setStatus(err.message, true); }
+    } }, el('b', { text: teamName(r, users) }), el('span', { text: u.display_name && u.display_name !== teamName(r, users) ? u.display_name : '' }));
+  }));
+}
+
 $('userForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = $('username').value.trim();
   if (!name) return;
   $('goBtn').disabled = true;
+  $('teamPick').classList.add('hidden');
   try {
+    const lid = leagueIdFrom(name);
+    if (lid) { await startFromLeague(lid); return; }
     setStatus('Looking up your account…');
     const user = await get('/user/' + encodeURIComponent(name));
     if (!user || !user.user_id) throw new Error("We couldn't find that Sleeper username.");
@@ -692,6 +733,14 @@ $('userForm').addEventListener('submit', async (e) => {
     setStatus('Finding your leagues…');
     state.leagues = await get(`/user/${user.user_id}/leagues/nfl/${state.nfl.season}`);
     if (!state.leagues.length) throw new Error(`No ${state.nfl.season} NFL leagues found for ${user.display_name}.`);
+    // Optional league name: open the matching league first (partial match, ignoring case and spaces).
+    const want = norm($('leagueName').value.trim());
+    if (want) {
+      const hit = state.leagues.find((l) => norm(l.name || '') === want) || state.leagues.find((l) => norm(l.name || '').includes(want));
+      if (!hit) throw new Error(`${user.display_name} isn't in a league called "${$('leagueName').value.trim()}". Their leagues: ${state.leagues.map((l) => l.name).join(', ')}.`);
+      store('bb_league', $('leagueName').value.trim());
+      state.leagues = [hit, ...state.leagues.filter((l) => l !== hit)];
+    }
     state.week = state.nfl.display_week || state.nfl.week || 1;
     enterApp();
   } catch (err) { setStatus(err.message, true); }
@@ -1547,6 +1596,8 @@ scheduleKicks(4000);
 
 const saved = load('bb_username');
 if (saved) $('username').value = saved;
+const savedLeague = load('bb_league');
+if (savedLeague) $('leagueName').value = savedLeague;
 </script>
 </body>
 </html>
