@@ -211,6 +211,7 @@
   .game .gs { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-top: 4px; }
 
   .lowsnap { color: var(--clay); }
+  .opp-up { color: var(--forest); }
   .how { font-size: 13.5px; color: var(--muted); }
   .how p { margin: 8px 0 0; }
 
@@ -300,18 +301,18 @@ const timeout = (ms, p) => Promise.race([p, new Promise((_, rej) => setTimeout((
 const PLAYERS_TTL = 30 * 60 * 1000;
 async function getPlayers(force) {
   if (!force && state.players && Date.now() - state.playersAt < PLAYERS_TTL) return state.players;
-  const cached = load('bb_players_v3');
+  const cached = load('bb_players_v4');
   if (!force && cached && Date.now() - cached.t < PLAYERS_TTL) { state.playersAt = cached.t; return (state.players = cached.data); }
   const raw = await get('/players/nfl');
   const slim = {};
   for (const [id, p] of Object.entries(raw)) {
     slim[id] = {
       n: p.position === 'DEF' ? `${p.first_name} ${p.last_name}` : (p.full_name || `${p.first_name || ''} ${p.last_name || ''}`.trim()),
-      p: p.position, t: p.team, i: p.injury_status, e: p.espn_id, b: p.injury_body_part, a: p.status,
+      p: p.position, t: p.team, i: p.injury_status, e: p.espn_id, b: p.injury_body_part, a: p.status, d: p.depth_chart_order,
     };
   }
   state.playersAt = Date.now();
-  store('bb_players_v3', { t: state.playersAt, data: slim });
+  store('bb_players_v4', { t: state.playersAt, data: slim });
   return (state.players = slim);
 }
 
@@ -793,6 +794,36 @@ function snapNote(p) {
   if (p.snapToday && (p.live || p.final)) parts.push(`Today ${p.snapToday.snp} snaps (${Math.round((p.snapToday.snp / p.snapToday.tm) * 100)}%)`);
   return parts.join(' · ');
 }
+// Team role: rank among same-team, same-position players by recent snap share (depth chart order breaks ties / fills gaps).
+function teamIndex(players, snaps) {
+  const idx = {};
+  for (const [id, p] of Object.entries(players)) {
+    if (!p.t || !['QB', 'RB', 'WR', 'TE'].includes(p.p) || p.a === 'Inactive') continue;
+    const sh = snaps?.recent?.[id]?.length ? avg(snaps.recent[id]) : null;
+    if (sh == null && (p.d == null || p.d > 4)) continue;          // not part of the rotation
+    (idx[p.t + ':' + p.p] ||= []).push({ id, n: p.n, sh, d: p.d ?? 9, st: p.i || '' });
+  }
+  for (const list of Object.values(idx)) list.sort((a, b) => ((b.sh ?? -1) - (a.sh ?? -1)) || (a.d - b.d));
+  return idx;
+}
+const isOut = (st) => /^(out|ir|pup|sus|doubtful)/i.test(st || '');
+function roleInfo(p, idx) {
+  if (!idx || !p.team || !['QB', 'RB', 'WR', 'TE'].includes(p.pos)) return null;
+  const list = idx[p.team + ':' + p.pos] || [];
+  const healthy = list.filter((x) => !isOut(x.st));
+  const rank = list.findIndex((x) => x.id === p.id);
+  if (rank < 0) return null;
+  // Teammates at the same position who usually play a real role but are out/doubtful this week.
+  const missing = list.filter((x) => x.id !== p.id && isOut(x.st) && ((x.sh ?? 0) >= 40 || x.d <= 2));
+  const newRank = healthy.findIndex((x) => x.id === p.id);
+  return { role: `${p.pos}${rank + 1}`, newRole: newRank >= 0 && newRank !== rank ? `${p.pos}${newRank + 1}` : null, missing };
+}
+function roleNote(p, idx) {
+  const r = roleInfo(p, idx); if (!r || p.unavailable) return '';
+  if (!r.missing.length) return `${r.role} on ${p.team} by recent snaps.`;
+  const who = r.missing.map((x) => `${x.n} (${x.st}${x.sh != null ? ', ' + Math.round(x.sh) + '% snaps' : ''})`).join(', ');
+  return `${r.role} on ${p.team}. Teammate ${who} may miss this game${r.newRole ? `, moving ${p.name} up to ${r.newRole}` : ''}, so more snaps and touches are likely. Sleeper and ESPN projections usually already include this.`;
+}
 const snapShort = (p) => { const sh = snapShare(p); return sh == null || ['K', 'DEF'].includes(p.pos) ? null : `${sh}% snaps`; };
 const kfmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
 function crowdNote(p) {
@@ -890,6 +921,7 @@ function render(d) {
   const slots = league.roster_positions.filter((p) => !['BN', 'IR', 'TAXI'].includes(p));
   const scoring = league.scoring_settings || {};
   const base = { players, sleeper, espn, espnOwn, trend, starts, snaps: d.snaps, scoring, games };
+  const tidx = teamIndex(players, d.snaps);
   const ctxMine = { ...base, pts: myM?.players_points || {} };
   const ctxOpp = { ...base, pts: oppM?.players_points || {} };
   const ev = (id, c) => (id && id !== '0' ? evalPlayer(id, c) : null);
@@ -1024,6 +1056,10 @@ function render(d) {
   for (const p of benchPool) if (!p.unavailable && !p.started && p.startPct >= 60) crowd.push(`${p.name} has ${Math.round(p.startPct)}% start on ${where(p)} but is on your bench.`);
   for (const p of myStart) if (!p.started && typeof p.startPct === 'number' && p.startPct <= 25) crowd.push(`Only ${Math.round(p.startPct)}% of ${where(p)} managers start ${p.name}.`);
   for (const p of myStart) if (!p.started && snapShare(p) != null && snapShare(p) < 40 && !['K', 'DEF'].includes(p.pos)) crowd.push(`${p.name} has played only ${snapShare(p)}% of snaps lately, so fewer chances to score.`);
+  for (const p of [...myStart, ...benchPool]) if (!p.started && !p.unavailable) {
+    const r = roleInfo(p, tidx);
+    if (r?.missing.length) crowd.push(`More opportunity for ${p.name}: ${r.missing.map((x) => x.n).join(', ')} (${p.team} ${p.pos}) ${r.missing.length > 1 ? 'are' : 'is'} ${r.missing[0].st.toLowerCase()}.`);
+  }
   for (const p of myStart) if (!p.started && p.drops >= 500) crowd.push(`${p.name} is among Sleeper's most-dropped players today (${kfmt(p.drops)} drops).`);
   for (const p of benchPool) if (!p.started && p.adds >= 500) crowd.push(`${p.name} is among Sleeper's most-added players today (${kfmt(p.adds)} adds).`);
   if (crowd.length) watchCard.append(el('div', { class: 'label', style: 'margin:14px 0 2px', text: 'Crowd check' }), ...crowd.slice(0, 5).map((t) => el('div', { class: 'ev', text: t })));
@@ -1089,12 +1125,13 @@ function render(d) {
         moved ? `Moves to ${SLOT_LABEL[s] || s} to make room. ` : null, sg.text));
       if (!p.started) [srcNote(p, !!espn), crowdNote(p)].forEach((t) => t && why.append(el('div', { class: 'pm', text: t })));
       const snt = snapNote(p); if (snt) why.append(el('div', { class: 'pm' + (snapShare(p) < 40 ? ' lowsnap' : ''), text: snt }));
+      const rn = !p.final ? roleNote(p, tidx) : ''; if (rn) why.append(el('div', { class: 'pm' + (roleInfo(p, tidx)?.missing.length ? ' opp-up' : ''), text: rn }));
       const sn = scriptNote(p); if (sn) why.append(el('div', { class: 'pm', text: sn }));
     }
     row.append(el('span', { class: 'slot', text: SLOT_LABEL[s] || s }));
     if (!solo) row.append(o
       ? el('div', { class: 'side r' },
-          el('div', { class: 'who' }, el('div', { class: 'pn' }, el('span', { class: 'nmx', text: o.name }), o.final ? null : statusBadge(o)), el('div', { class: 'pm', text: [metaOf(o), snapShort(o)].filter(Boolean).join(' · ') })),
+          el('div', { class: 'who' }, el('div', { class: 'pn' }, el('span', { class: 'nmx', text: o.name }), o.final ? null : statusBadge(o)), el('div', { class: 'pm', text: [metaOf(o), roleInfo(o, tidx)?.role, snapShort(o)].filter(Boolean).join(' · ') })),
           scoreCell(o))
       : el('div', { class: 'side r' }, el('div', { class: 'pm', text: 'Empty' })));
     if (why) row.append(why);
@@ -1121,6 +1158,7 @@ function render(d) {
       el('div', { class: 'why' }, sg.text));
     if (!p.started && !p.unavailable) [srcNote(p, !!espn), crowdNote(p), scriptNote(p)].forEach((t) => t && left.append(el('div', { class: 'pm', text: t })));
     if (!p.unavailable) { const snt = snapNote(p); if (snt) left.append(el('div', { class: 'pm' + (snapShare(p) < 40 ? ' lowsnap' : ''), text: snt })); }
+    const rn = !p.final ? roleNote(p, tidx) : ''; if (rn) left.append(el('div', { class: 'pm' + (roleInfo(p, tidx)?.missing.length ? ' opp-up' : ''), text: rn }));
     const right = scoreCell(p);
     myCol.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') }, el('span', { class: 'slot', text: p.pos || '-' }), left, right));
   });
@@ -1134,7 +1172,7 @@ function render(d) {
       theirCol.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') }, el('span', { class: 'slot', text: p.pos || '-' }),
         el('div', {},
           el('div', { class: 'pn' }, p.name, p.final ? null : statusBadge(p)),
-          el('div', { class: 'pm', text: [metaOf(p), snapShort(p)].filter(Boolean).join(' · ') }),
+          el('div', { class: 'pm', text: [metaOf(p), roleInfo(p, tidx)?.role, snapShort(p)].filter(Boolean).join(' · ') }),
           worse ? el('div', { class: 'why', text: 'Projects more than one of their starters. Watch for a lineup change.' }) : null),
         scoreCell(p)));
     });
@@ -1149,7 +1187,7 @@ function render(d) {
     el('p', { text: "Live: for a player whose game is under way, the estimate is their points so far plus the projection for the rest of the game. Finished games are locked in. Your win chance compares both teams' estimated finals, and refreshes about every 45 seconds." }),
     el('p', { text: 'Players whose games have started cannot be moved, so suggestions only involve players who have not played yet. Out/IR players are skipped, and Doubtful players are discounted. Estimates only; check injuries before kickoff.' }),
     el('p', { text: "Watch compares each refresh with the last one and logs injury status changes (yours and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. Injury statuses refresh about every 30 minutes. Alerts only work while this page is open in a tab; it keeps checking in the background when alerts are on." }),
-    el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Snap share is the player's share of their team's offensive snaps over the last 3 games, from Sleeper's weekly stats; under 40% is flagged. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
+    el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Snap share is the player's share of their team's offensive snaps over the last 3 games, from Sleeper's weekly stats; under 40% is flagged. Roles (WR1, WR2…) rank teammates at the same position by recent snap share, using Sleeper's depth chart where snaps are missing. When a teammate who plays a real role is out or doubtful, the player is flagged for more opportunity; this is a note, not a projection change, because Sleeper and ESPN already adjust for announced injuries. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
   view.append(lower);
 }
 
