@@ -232,6 +232,25 @@
   .tpick .tp-v { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
   @media (max-width: 640px) { .seg { width: 100%; } .seg-b { flex: 1; padding: 8px 6px; font-size: 13px; } }
 
+  /* schedule strength */
+  .sos { padding: 10px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; }
+  .sos.first { border-top: 0; }
+  .sos-p { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center; min-width: 0; }
+  .sos-w { display: flex; gap: 5px; }
+  .wkc { display: flex; flex-direction: column; align-items: center; min-width: 52px; border: 0; border-radius: 10px; padding: 4px 6px; font: inherit; line-height: 1.15; }
+  .wkc small { font-size: 10px; opacity: .75; }
+  .wkc b { font-size: 12.5px; }
+  .wkc.e1 { background: var(--forest); color: #fff; }
+  .wkc.e2 { background: var(--forest-soft); color: var(--forest); }
+  .wkc.e3 { background: var(--gold-soft); color: var(--gold); }
+  .wkc.e4 { background: var(--clay-soft); color: var(--bad); }
+  .wkc.bye { background: var(--line); color: var(--muted); }
+  .sos-d { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); background: var(--brown-soft); border-radius: 10px; padding: 8px 10px; }
+  .sos-d div + div { margin-top: 4px; }
+  .softs { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px 16px; }
+  .soft b { font-size: 12px; color: var(--brown); margin-right: 6px; }
+  @media (max-width: 640px) { .sos { grid-template-columns: 1fr; } .sos-w { justify-content: space-between; } .wkc { flex: 1; min-width: 0; } }
+
   /* bench, both teams */
   .bcols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
   .bcols.solo { grid-template-columns: 1fr; }
@@ -529,12 +548,19 @@ async function getSleeperStarts(season, week) {
 // Snap counts from Sleeper's weekly stats (unofficial): off_snp = player's offensive snaps, tm_off_snp = team's.
 // Recent share comes from the last 3 weeks; the current week gives live snaps while games are on.
 const STATS = 'https://api.sleeper.com/stats/nfl';
-async function getWeekSnaps(season, week) {
+// Raw weekly stat rows; past weeks are cached for the session (they don't change).
+const statsCache = {};
+async function getWeekStats(season, week, fresh) {
+  const key = season + ':' + week;
+  if (!fresh && statsCache[key]) return statsCache[key];
   const qs = ['QB', 'RB', 'WR', 'TE'].map((p) => `position[]=${p}`).join('&');
-  const r = await fetch(`${STATS}/${season}/${week}?season_type=regular&${qs}`);
-  if (!r.ok) throw new Error('Sleeper stats returned ' + r.status);
+  const p = fetch(`${STATS}/${season}/${week}?season_type=regular&${qs}`).then((r) => { if (!r.ok) throw new Error('Sleeper stats returned ' + r.status); return r.json(); });
+  statsCache[key] = p; p.catch(() => delete statsCache[key]);
+  return p;
+}
+async function getWeekSnaps(season, week) {
   const out = {};
-  for (const row of await r.json()) {
+  for (const row of await getWeekStats(season, week, week >= state.week)) {
     const st = row?.stats; if (!row?.player_id || !st) continue;
     if (typeof st.off_snp === 'number' && st.tm_off_snp > 0) out[row.player_id] = { snp: st.off_snp, tm: st.tm_off_snp };
   }
@@ -1075,6 +1101,8 @@ function notesFor(p, idx) {
   const note = (k, text, cls = '') => n.push(el('div', { class: 'note ' + cls }, el('b', { text: k }), el('span', { text })));
   const r = roleInfo(p, idx);
   if (r?.missing.length && !p.unavailable && !p.final) note('Opportunity', `${r.missing.map((x) => `${x.n} (${x.st})`).join(', ')} may miss this game${r.newRole ? `, moving ${p.name} up to ${r.newRole}` : ''}. More snaps and touches likely.`, 'up');
+  const mu = !p.started && !p.unavailable ? matchupInfo(p, state.data?.def) : null;
+  if (mu && (mu.r <= mu.n * 0.25 || mu.r > mu.n * 0.75)) note('Matchup', defLine(mu, p.pos) + '.', mu.r <= mu.n * 0.25 ? 'up' : 'down');
   const sn = scriptNote(p); if (sn) note('Game', sn);
   const bi = (p.bonus?.items || []).filter((b) => b.chance != null && b.chance >= 0.15).sort((a, b) => b.exp - a.exp).slice(0, 2);
   if (bi.length && !p.started && !p.unavailable) note('Bonus', bi.map((b) => `${Math.round(b.chance * 100)}% chance of ${b.label} (+${b.w})`).join(' · '), 'up');
@@ -1224,6 +1252,7 @@ function leagueOverview(d, { base, ev, slots, wk, srcs, mine, tidx }) {
         el('div', { class: 'prob-row' }, el('span', {}, done ? 'Final' : 'Win chance ', done ? '' : el('b', { text: pct(pa) })), done ? null : el('span', {}, el('b', { text: pct(1 - pa) })))),
       det));
   }
+  box.append(scheduleCard(d, { mine }));
   // Standings: wins, then points for.
   const fpts = (r) => (r.settings.fpts || 0) + (r.settings.fpts_decimal || 0) / 100;
   const table = [...rosters].sort((x, y) => (y.settings.wins - x.settings.wins) || (fpts(y) - fpts(x)));
@@ -1232,6 +1261,115 @@ function leagueOverview(d, { base, ev, slots, wk, srcs, mine, tidx }) {
       el('span', { class: 'rk', text: i + 1 }), el('span', { class: 'nm', text: teamName(r, users) }),
       el('span', { class: 'rec', text: record(r) }), el('span', { class: 'pf', text: fpts(r) ? `${f1(fpts(r))} pts` : '' })))));
   return box;
+}
+
+// ---------------- defense vs position + schedule strength ----------------
+// Built from past weeks: each player's fantasy points (league scoring) are credited to the defense they faced.
+const DPOS = ['QB', 'RB', 'WR', 'TE'];
+const SOS_WEEKS = 4;
+async function loadDefense(d) {
+  if (d.def || d.defLoading) return;
+  d.defLoading = true;
+  const season = state.nfl.season, scoring = d.league.scoring_settings || {}, now = state.week;
+  const past = Array.from({ length: now - 1 }, (_, i) => i + 1);
+  const ahead = Array.from({ length: SOS_WEEKS }, (_, i) => now + i).filter((w) => w <= 18);
+  const [stats, pastGames, nextGames] = await Promise.all([
+    Promise.allSettled(past.map((w) => getWeekStats(season, w))),
+    Promise.allSettled(past.map((w) => getGames(season, w))),
+    Promise.allSettled(ahead.map((w) => (w === now && d.games ? Promise.resolve(d.games) : getGames(season, w)))),
+  ]);
+  const allowed = {};                         // def team -> pos -> totals
+  past.forEach((w, i) => {
+    if (stats[i].status !== 'fulfilled') return;
+    const games = pastGames[i].status === 'fulfilled' ? pastGames[i].value : {};
+    for (const row of stats[i].value) {
+      const db = d.players[row.player_id]; const pos = db?.p || row.player?.position;
+      if (!DPOS.includes(pos) || !row.stats) continue;
+      const team = row.team || db?.t; const opp = row.opponent || games[team]?.opp;
+      if (!opp) continue;
+      const st = row.stats; const pts = leaguePts(st, scoring, pos) || 0;
+      const a = ((allowed[opp] ||= {})[pos] ||= { pts: 0, weeks: new Set(), rush_yd: 0, rush_td: 0, rec_yd: 0, rec_td: 0, pass_yd: 0, pass_td: 0 });
+      a.pts += pts; a.weeks.add(w);
+      for (const k of ['rush_yd', 'rush_td', 'rec_yd', 'rec_td', 'pass_yd', 'pass_td']) a[k] += st[k] || 0;
+    }
+  });
+  const rank = {};                            // pos -> team -> { r, pg, detail }
+  for (const pos of DPOS) {
+    const list = Object.entries(allowed).filter(([, v]) => v[pos]?.weeks.size).map(([t, v]) => {
+      const a = v[pos], g = a.weeks.size;
+      return { t, pg: a.pts / g, g, per: Object.fromEntries(['rush_yd', 'rush_td', 'rec_yd', 'rec_td', 'pass_yd', 'pass_td'].map((k) => [k, a[k] / g])) };
+    }).sort((x, y) => y.pg - x.pg);
+    rank[pos] = {}; list.forEach((x, i) => { rank[pos][x.t] = { ...x, r: i + 1, n: list.length }; });
+  }
+  const sched = ahead.map((w, i) => ({ w, games: nextGames[i].status === 'fulfilled' ? nextGames[i].value : null }));
+  d.def = { rank, sched, weeks: past.length };
+  d.defLoading = false;
+  if (state.data === d) render(d);
+}
+function defLine(dr, pos) {
+  const p = dr.per;
+  const extra = pos === 'RB' ? `${Math.round(p.rush_yd)} rush yds, ${f1(p.rush_td)} rush TDs` : pos === 'QB' ? `${Math.round(p.pass_yd)} pass yds, ${f1(p.pass_td)} pass TDs`
+    : `${Math.round(p.rec_yd)} rec yds, ${f1(p.rec_td)} rec TDs`;
+  const where = dr.r === 1 ? 'most' : dr.r === dr.n ? 'fewest' : dr.r <= dr.n / 2 ? `${ordinal(dr.r)}-most` : `${ordinal(dr.n - dr.r + 1)}-fewest`;
+  return `${dr.t} allows the ${where} points to ${pos}s: ${f1(dr.pg)} per game (${extra} per game to ${pos}s)`;
+}
+const easeCls = (dr) => (!dr ? 'bye' : dr.r <= dr.n * 0.25 ? 'e1' : dr.r <= dr.n * 0.5 ? 'e2' : dr.r <= dr.n * 0.75 ? 'e3' : 'e4');
+// This week's matchup for a player, from the defense ratings (when loaded).
+function matchupInfo(p, def) {
+  if (!def || !DPOS.includes(p.pos) || !p.team) return null;
+  const opp = def.sched[0]?.games?.[p.team]?.opp || p.opp;
+  return opp ? def.rank[p.pos]?.[opp] || null : null;
+}
+
+function scheduleCard(d, { mine }) {
+  const card = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Schedule strength' }), el('span', { class: 'label', text: `Next ${SOS_WEEKS} weeks` })));
+  if (!d.def) {
+    loadDefense(d);
+    card.append(el('div', { class: 'pm', text: 'Rating every defense from this season\'s games…' }), el('div', { class: 'skel', style: 'height:90px;margin:10px 0 0' }));
+    return card;
+  }
+  const { rank, sched, weeks } = d.def;
+  if (!weeks || !Object.keys(rank.RB || {}).length) { card.append(el('div', { class: 'pm', text: 'Defense ratings need at least one week of games. Check back after week 1.' })); return card; }
+  const { rosters, users } = d;
+  const pick = state.sosTeam ?? mine.roster_id;
+  const sel = el('select', { class: 'tsel', 'aria-label': 'Whose players', onchange: (e) => { state.sosTeam = e.target.value === 'all' ? 'all' : Number(e.target.value); render(state.data); } },
+    el('option', { value: 'all', text: 'All rostered players' }), rosters.map((r) => el('option', { value: r.roster_id, text: teamName(r, users) + (r.roster_id === mine.roster_id ? ' (you)' : '') })));
+  sel.value = String(pick);
+  card.append(el('div', { class: 'pm', style: 'margin-bottom:10px', text: `Each opponent's defense is rated by fantasy points it allowed to that position over ${weeks} week${weeks > 1 ? 's' : ''} (your league's scoring). Green = soft matchup, red = tough. Tap a week for details.` }), el('div', { style: 'margin-bottom:10px' }, sel));
+  const owners = pick === 'all' ? rosters : rosters.filter((r) => r.roster_id === pick);
+  const rows = [];
+  for (const r of owners) for (const id of r.players || []) {
+    const db = d.players[id]; if (!db || !DPOS.includes(db.p) || !db.t || /^(ir|pup|sus)/i.test(db.i || '')) continue;
+    const wk = sched.map((s) => { const opp = s.games?.[db.t]?.opp; return { w: s.w, opp, dr: opp ? rank[db.p][opp] : null, home: s.games?.[db.t]?.home }; });
+    const rated = wk.filter((x) => x.dr);
+    if (!rated.length) continue;
+    const ease = avg(rated.map((x) => 1 - (x.dr.r - 1) / (x.dr.n - 1 || 1)));    // 1 = softest possible
+    rows.push({ id, db, wk, ease, owner: teamName(r, users), mineP: r.roster_id === mine.roster_id });
+  }
+  rows.sort((a, b) => b.ease - a.ease);
+  const show = rows.slice(0, pick === 'all' ? 40 : 30);
+  if (!show.length) card.append(el('div', { class: 'pm', text: 'No schedule data for these players yet.' }));
+  show.forEach((x, i) => {
+    const grade = x.ease >= 0.7 ? ['Easy', 'good'] : x.ease >= 0.45 ? ['Average', ''] : ['Tough', 'bad'];
+    card.append(el('div', { class: 'sos' + (i === 0 ? ' first' : '') },
+      el('div', { class: 'sos-p' }, el('span', { class: 'slot', text: x.db.p }),
+        el('div', {}, el('div', { class: 'pn' }, x.db.n, el('span', { class: 'sc ' + grade[1], text: grade[0] })),
+          el('div', { class: 'pm', text: [x.db.t, pick === 'all' ? x.owner : null].filter(Boolean).join(' · ') }))),
+      el('div', { class: 'sos-w' }, x.wk.map((w) => el('button', { type: 'button', class: 'wkc ' + easeCls(w.dr), title: w.dr ? defLine(w.dr, x.db.p) : 'Bye',
+      },
+        el('small', { text: 'W' + w.w }), el('b', { text: w.opp ? (w.home === false ? '@' : '') + w.opp : 'BYE' }), w.dr ? el('small', { text: ordinal(w.dr.r) }) : null)))));
+    // tap details (one line per week)
+    const det = el('div', { class: 'sos-d hidden' }, x.wk.filter((w) => w.dr).map((w) => el('div', { text: `Week ${w.w}: ${defLine(w.dr, x.db.p)}.` })));
+    card.lastChild.append(det);
+    card.lastChild.querySelectorAll('.wkc').forEach((b) => b.addEventListener('click', () => det.classList.toggle('hidden')));
+  });
+  // Softest defenses by position this season.
+  card.append(el('div', { class: 'label', style: 'margin:16px 0 6px', text: 'Softest defenses so far' }),
+    el('div', { class: 'softs' }, DPOS.map((pos) => {
+      const top = Object.values(rank[pos]).sort((a, b) => a.r - b.r).slice(0, 3);
+      return el('div', { class: 'soft' }, el('b', { text: `vs ${pos}` }), el('span', { class: 'pm', text: top.map((t) => `${t.t} ${f1(t.pg)}`).join(' · ') }));
+    })));
+  return card;
 }
 
 // ---------------- team analyzer + trades ----------------
@@ -1643,6 +1781,7 @@ function render(d) {
     el('p', { text: 'Players whose games have started cannot be moved, so suggestions only involve players who have not played yet. Out/IR players are skipped, and Doubtful players are discounted. Estimates only; check injuries before kickoff.' }),
     el('p', { text: "Watch compares each refresh with the last one and logs injury status changes (yours and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. Injury statuses refresh about every 30 minutes. Alerts only work while this page is open in a tab; it keeps checking in the background when alerts are on." }),
     el('p', { text: "Value (0–100) is this week's Bench Boss score: 55% projection rank at the position (Sleeper and ESPN combined), 15% snap share, 15% start %, 10% how closely Sleeper and ESPN agree, 5% add/drop trend. A 85+, B 72+, C 58+, D 42+." }),
+    el('p', { text: "Matchup notes and Schedule strength (in Whole league) rate each NFL defense by the fantasy points it has allowed per game to each position this season, using Sleeper's weekly stats scored with your league's settings and ESPN's schedule. A defense ranked 1st allows the most points (the easiest matchup)." }),
     el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Snap share is the player's share of their team's offensive snaps over the last 3 games, from Sleeper's weekly stats; under 40% is flagged. Roles (WR1, WR2…) rank teammates at the same position by recent snap share, using Sleeper's depth chart where snaps are missing. When a teammate who plays a real role is out or doubtful, the player is flagged for more opportunity; this is a note, not a projection change, because Sleeper and ESPN already adjust for announced injuries. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
   view.append(lower);
   $('watchBtn').classList.toggle('hidden', onTrades());
