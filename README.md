@@ -16,6 +16,8 @@ The whole app is a single `index.html`, with no build step.
 - **Shows the games that decide your matchup.** For each NFL game, the Watch pop-up shows how many projected points you and your opponent have left in it, the betting favorite or live win chance, and when your players face your opponent's defense.
 - **Shows snap share.** Each player shows the share of their team's offensive snaps they played over the last 3 games, plus today's snap count during games. Players under 40% are flagged because they get fewer chances to score.
 - **Shows team roles and opportunity.** Each player gets a role like WR1 or RB2, ranked by recent snap share (Sleeper's depth chart fills gaps). When a teammate at the same position who usually plays is out or doubtful, the player is flagged for more snaps and touches. This is a note only, because Sleeper and ESPN projections already adjust for announced injuries.
+- **Keeps player details tidy.** Under each player: one line with the reason, a row of small chips (Sleeper and ESPN projections, whether the sources agree, role, snap share, start %, adds and drops), and short labelled notes for Game, Opportunity and Snaps.
+- **Has a bit of fun.** The cursor is a small football, and every minute or two a football is kicked through a goalpost. Tap the Bench Boss logo to kick one yourself. On phones, a little football pops wherever you tap. All of this is off when your device is set to reduce motion.
 - **Shows a Predicted winner line.** This line names the team expected to win the matchup, and by how much, using the combined Sleeper and ESPN projections.
 
 ## How it works

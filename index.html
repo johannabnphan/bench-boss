@@ -211,7 +211,29 @@
   .game .gs { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-top: 4px; }
 
   .lowsnap { color: var(--clay); }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .sc { font-size: 11.5px; font-weight: 500; padding: 2px 8px; border-radius: 999px; background: var(--brown-soft); color: var(--brown); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .sc.role { font-weight: 700; }
+  .sc.good { background: var(--forest-soft); color: var(--forest); }
+  .sc.warn { background: var(--gold-soft); color: var(--gold); }
+  .sc.bad { background: var(--clay-soft); color: var(--bad); }
+  .note { display: flex; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+  .note b { flex: none; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--brown); padding-top: 2px; min-width: 76px; }
+  .note.up b { color: var(--forest); }
+  .note.down b { color: var(--bad); }
+  @media (max-width: 640px) { .note { flex-direction: column; gap: 0; } .note b { min-width: 0; } }
   .opp-up { color: var(--forest); }
+  /* fun: football cursor, kicks through the uprights, tap footballs */
+  html { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='18' viewBox='0 0 26 18'%3E%3Cellipse cx='13' cy='9' rx='12' ry='7.5' fill='%238a5a33' stroke='%235c3a1f' stroke-width='1.2'/%3E%3Cpath d='M8 9h10' stroke='white' stroke-width='1.3'/%3E%3Cpath d='M10 7v4M12.5 7v4M15 7v4' stroke='white' stroke-width='1'/%3E%3C/svg%3E") 13 9, auto; }
+  a, button, summary, label, .tab, [role="button"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='18' viewBox='0 0 26 18'%3E%3Cellipse cx='13' cy='9' rx='12' ry='7.5' fill='%238a5a33' stroke='%235c3a1f' stroke-width='1.2'/%3E%3Cpath d='M8 9h10' stroke='white' stroke-width='1.3'/%3E%3Cpath d='M10 7v4M12.5 7v4M15 7v4' stroke='white' stroke-width='1'/%3E%3C/svg%3E") 13 9, pointer; }
+  input, textarea { cursor: text; }
+  .brand { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='18' viewBox='0 0 26 18'%3E%3Cellipse cx='13' cy='9' rx='12' ry='7.5' fill='%238a5a33' stroke='%235c3a1f' stroke-width='1.2'/%3E%3Cpath d='M8 9h10' stroke='white' stroke-width='1.3'/%3E%3Cpath d='M10 7v4M12.5 7v4M15 7v4' stroke='white' stroke-width='1'/%3E%3C/svg%3E") 13 9, pointer; user-select: none; }
+  .fun { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+  .fun .ball { position: absolute; left: 0; top: 0; width: 38px; height: 23px; filter: drop-shadow(0 4px 4px rgba(70,45,25,.25)); }
+  .fun .post { position: absolute; width: 84px; height: 150px; }
+  .fun .good { position: absolute; font-family: var(--serif); font-weight: 700; font-size: 26px; color: var(--forest); letter-spacing: .02em; text-shadow: 0 2px 0 var(--card); }
+  .fun .tap { position: absolute; width: 22px; height: 14px; }
+  @media (max-width: 640px) { .fun .post { width: 62px; height: 112px; } .fun .ball { width: 30px; height: 18px; } }
   .how { font-size: 13.5px; color: var(--muted); }
   .how p { margin: 8px 0 0; }
 
@@ -825,6 +847,34 @@ function roleNote(p, idx) {
   return `${r.role} on ${p.team}. Teammate ${who} may miss this game${r.newRole ? `, moving ${p.name} up to ${r.newRole}` : ''}, so more snaps and touches are likely. Sleeper and ESPN projections usually already include this.`;
 }
 const snapShort = (p) => { const sh = snapShare(p); return sh == null || ['K', 'DEF'].includes(p.pos) ? null : `${sh}% snaps`; };
+// Compact stat chips + labelled notes under each player (replaces the old stack of grey lines).
+function chipsFor(p, idx) {
+  const c = [];
+  const chip = (text, cls = '', title = null) => c.push(el('span', { class: 'sc ' + cls, text, title }));
+  if (!p.started && !p.unavailable) {
+    if (p.s != null) chip(`Sleeper ${f1(p.s)}`);
+    if (p.e != null) chip(`ESPN ${f1(p.e)}`);
+    if (p.s != null && p.e != null) Math.abs(p.s - p.e) < 1.5 ? chip('Sources agree', 'good', 'Sleeper and ESPN are within 1.5 points, so higher confidence')
+      : chip('Sources split', 'warn', `Sleeper ${f1(p.s)} vs ESPN ${f1(p.e)}: treated as riskier`);
+  }
+  const r = roleInfo(p, idx); if (r) chip(r.role, 'role', 'Rank among teammates at this position by recent snap share');
+  const sh = snapShare(p);
+  if (sh != null && !['K', 'DEF'].includes(p.pos)) chip(`${sh}% snaps`, sh < 40 ? 'bad' : '', `Share of team offensive snaps, last ${p.snapRecent.length} games: ${p.snapRecent.join(', ')}%`);
+  if (p.snapToday && (p.live || p.final)) chip(`Today ${p.snapToday.snp} snaps`, '', `${Math.round((p.snapToday.snp / p.snapToday.tm) * 100)}% of team snaps`);
+  if (typeof p.startPct === 'number' && !p.started) chip(`${Math.round(p.startPct)}% start`, '', [p.slStart != null ? `Sleeper ${Math.round(p.slStart)}%` : null, p.espnStart != null ? `ESPN ${Math.round(p.espnStart)}%` : null].filter(Boolean).join(' · '));
+  if (p.adds >= 100) chip(`+${kfmt(p.adds)} adds`, 'good', 'Sleeper adds in the last 24 hours');
+  if (p.drops >= 100) chip(`−${kfmt(p.drops)} drops`, 'warn', 'Sleeper drops in the last 24 hours');
+  return c.length ? el('div', { class: 'chips' }, c) : null;
+}
+function notesFor(p, idx) {
+  const n = [];
+  const note = (k, text, cls = '') => n.push(el('div', { class: 'note ' + cls }, el('b', { text: k }), el('span', { text })));
+  const r = roleInfo(p, idx);
+  if (r?.missing.length && !p.unavailable && !p.final) note('Opportunity', `${r.missing.map((x) => `${x.n} (${x.st})`).join(', ')} may miss this game${r.newRole ? `, moving ${p.name} up to ${r.newRole}` : ''}. More snaps and touches likely.`, 'up');
+  const sn = scriptNote(p); if (sn) note('Game', sn);
+  const sh = snapShare(p); if (sh != null && sh < 40 && !['K', 'DEF'].includes(p.pos) && !p.unavailable) note('Snaps', `Only ${sh}% of snaps lately, so limited chances to score.`, 'down');
+  return n;
+}
 const kfmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
 function crowdNote(p) {
   const parts = [];
@@ -1115,18 +1165,14 @@ function render(d) {
     if (!p) row.append(el('div', { class: 'side' }, el('div', { class: 'pm', text: 'No eligible player available' })));
     else {
       const sg = suggestStarter(p, replaces[p.id] || null, swap, bestAlt(s), wpNow);
-      const src = !p.started ? [p.s != null ? `Sleeper ${f1(p.s)}` : null, p.e != null ? `ESPN ${f1(p.e)}` : null].filter(Boolean).join(' · ') : '';
       row.append(el('div', { class: 'side' },
         el('div', { class: 'who' },
           el('div', { class: 'pn' }, el('span', { class: 'nmx', text: p.name }), el('span', { class: 'badge ' + sg.cls, text: sg.label }), p.final ? null : statusBadge(p)),
-          el('div', { class: 'pm', text: metaOf(p) + (src ? ' · ' + src : '') })),
+          el('div', { class: 'pm', text: metaOf(p) })),
         scoreCell(p)));
       why = el('div', { class: 'hwhy' }, el('div', { class: 'why' }, swap && replaces[p.id] ? el('s', { text: `Instead of ${replaces[p.id].name}. ` }) : null,
         moved ? `Moves to ${SLOT_LABEL[s] || s} to make room. ` : null, sg.text));
-      if (!p.started) [srcNote(p, !!espn), crowdNote(p)].forEach((t) => t && why.append(el('div', { class: 'pm', text: t })));
-      const snt = snapNote(p); if (snt) why.append(el('div', { class: 'pm' + (snapShare(p) < 40 ? ' lowsnap' : ''), text: snt }));
-      const rn = !p.final ? roleNote(p, tidx) : ''; if (rn) why.append(el('div', { class: 'pm' + (roleInfo(p, tidx)?.missing.length ? ' opp-up' : ''), text: rn }));
-      const sn = scriptNote(p); if (sn) why.append(el('div', { class: 'pm', text: sn }));
+      why.append(chipsFor(p, tidx) || '', ...notesFor(p, tidx));
     }
     row.append(el('span', { class: 'slot', text: SLOT_LABEL[s] || s }));
     if (!solo) row.append(o
@@ -1151,14 +1197,11 @@ function render(d) {
   bench.forEach((p, i) => {
     const sg = suggestBench(p, { rec, slots, displaced });
     const meta = [p.pos, p.team || 'FA', p.opp ? 'vs ' + p.opp : null, p.tag && p.body && !p.bye ? p.body : null, p.started ? p.gameDetail : null].filter(Boolean).join(' · ');
-    const src = !p.started ? [p.s != null ? `Sleeper ${f1(p.s)}` : null, p.e != null ? `ESPN ${f1(p.e)}` : null].filter(Boolean).join(' · ') : '';
     const left = el('div', {},
       el('div', { class: 'pn' }, p.name, el('span', { class: 'badge ' + sg.cls, text: sg.label }), p.final || ['out', 'bye'].includes(sg.cls) ? null : statusBadge(p)),
-      el('div', { class: 'pm', text: meta + (src ? ' · ' + src : '') }),
+      el('div', { class: 'pm', text: meta }),
       el('div', { class: 'why' }, sg.text));
-    if (!p.started && !p.unavailable) [srcNote(p, !!espn), crowdNote(p), scriptNote(p)].forEach((t) => t && left.append(el('div', { class: 'pm', text: t })));
-    if (!p.unavailable) { const snt = snapNote(p); if (snt) left.append(el('div', { class: 'pm' + (snapShare(p) < 40 ? ' lowsnap' : ''), text: snt })); }
-    const rn = !p.final ? roleNote(p, tidx) : ''; if (rn) left.append(el('div', { class: 'pm' + (roleInfo(p, tidx)?.missing.length ? ' opp-up' : ''), text: rn }));
+    if (!p.unavailable) left.append(chipsFor(p, tidx) || '', ...notesFor(p, tidx));
     const right = scoreCell(p);
     myCol.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') }, el('span', { class: 'slot', text: p.pos || '-' }), left, right));
   });
@@ -1190,6 +1233,58 @@ function render(d) {
     el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Snap share is the player's share of their team's offensive snaps over the last 3 games, from Sleeper's weekly stats; under 40% is flagged. Roles (WR1, WR2…) rank teammates at the same position by recent snap share, using Sleeper's depth chart where snaps are missing. When a teammate who plays a real role is out or doubtful, the player is flagged for more opportunity; this is a note, not a projection change, because Sleeper and ESPN already adjust for announced injuries. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
   view.append(lower);
 }
+
+// ---------------- fun: a football kicked through the uprights now and then ----------------
+const BALL_SVG = '<svg viewBox="0 0 40 24" width="100%" height="100%"><ellipse cx="20" cy="12" rx="18.5" ry="10.5" fill="#8a5a33" stroke="#5c3a1f" stroke-width="1.5"/><path d="M5 12c3-2 3-2 0 0M35 12c-3-2-3-2 0 0" stroke="#fff" stroke-width="1.5"/><path d="M13 12h14" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><path d="M15.5 9.3v5.4M18.5 9.3v5.4M21.5 9.3v5.4M24.5 9.3v5.4" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/></svg>';
+const POST_SVG = '<svg viewBox="0 0 84 150" width="100%" height="100%"><g stroke="#d9a441" stroke-width="6" stroke-linecap="round" fill="none"><path d="M42 150V78"/><path d="M8 78h68"/><path d="M8 78V6M76 78V6"/></g></svg>';
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+let funLayer = null;
+const layer = () => funLayer || (funLayer = document.body.appendChild(el('div', { class: 'fun', 'aria-hidden': 'true' })));
+function kick() {
+  if (calm() || document.hidden) return;
+  const W = innerWidth, H = innerHeight, small = W <= 640;
+  const pw = small ? 62 : 84, ph = small ? 112 : 150;
+  const fromLeft = Math.random() < 0.5;
+  const px = fromLeft ? W - pw - Math.max(16, W * 0.06) : Math.max(16, W * 0.06), py = H * (0.18 + Math.random() * 0.25);
+  const post = el('div', { class: 'post', style: `left:${px}px;top:${py}px` }); post.innerHTML = POST_SVG;
+  const ball = el('div', { class: 'ball' }); ball.innerHTML = BALL_SVG;
+  layer().append(post, ball);
+  // Quadratic arc from off-screen low corner, through the middle of the uprights (above the crossbar), and beyond.
+  const bw = small ? 30 : 38, bh = small ? 18 : 23;
+  const x0 = fromLeft ? -50 : W + 50, y0 = H * 0.9;
+  const x2 = px + pw / 2, y2 = py + ph * 0.28;
+  const cx = (x0 + x2) / 2, cy = Math.max(20, Math.min(y0, y2) - H * 0.35);
+  const at = (t) => [(1 - t) ** 2 * x0 + 2 * (1 - t) * t * cx + t * t * x2, (1 - t) ** 2 * y0 + 2 * (1 - t) * t * cy + t * t * y2];
+  const frames = [];
+  for (let i = 0; i <= 24; i++) {
+    const t = (i / 20);                                   // runs to t = 1.2: through the posts and out the back
+    const [x, y] = at(t);
+    frames.push({ transform: `translate(${x - bw / 2}px, ${y - bh / 2}px) rotate(${(fromLeft ? 1 : -1) * t * 900}deg) scale(${1 - t * 0.35})`, opacity: t > 1.12 ? 0 : 1, offset: i / 24 });
+  }
+  post.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 300, fill: 'forwards' });
+  const fly = ball.animate(frames, { duration: 1700, easing: 'cubic-bezier(.3,.1,.5,1)', fill: 'forwards' });
+  fly.onfinish = () => {
+    const good = el('div', { class: 'good', text: 'GOOD!', style: `left:${px + pw / 2 - 40}px;top:${py - 38}px` });
+    layer().append(good);
+    good.animate([{ opacity: 0, transform: 'scale(.6)' }, { opacity: 1, transform: 'scale(1.1)', offset: 0.3 }, { opacity: 1, transform: 'scale(1)', offset: 0.7 }, { opacity: 0, transform: 'translateY(-14px)' }], { duration: 1300, fill: 'forwards' }).onfinish = () => good.remove();
+    post.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 600, delay: 900, fill: 'forwards' }).onfinish = () => post.remove();
+    ball.remove();
+  };
+}
+let kickTimer = null;
+function scheduleKicks(first) {
+  clearTimeout(kickTimer);
+  kickTimer = setTimeout(() => { kick(); scheduleKicks(); }, first ?? 60000 + Math.random() * 60000);   // every 1–2 minutes
+}
+$('connect').closest('main').querySelector('.brand').addEventListener('click', kick);
+// No cursor on phones, so a tap pops a little football where your finger lands.
+document.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch' || calm()) return;
+  const b = el('div', { class: 'tap', style: `left:${e.clientX - 11}px;top:${e.clientY - 7}px` }); b.innerHTML = BALL_SVG;
+  layer().append(b);
+  b.animate([{ opacity: 1, transform: 'scale(.4) rotate(0)' }, { opacity: 1, transform: 'translateY(-26px) scale(1) rotate(200deg)', offset: 0.5 }, { opacity: 0, transform: 'translateY(-8px) scale(.8) rotate(360deg)' }], { duration: 700, easing: 'ease-out' }).onfinish = () => b.remove();
+}, { passive: true });
+scheduleKicks(4000);
 
 const saved = load('bb_username');
 if (saved) $('username').value = saved;
