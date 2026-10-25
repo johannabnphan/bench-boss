@@ -8,6 +8,7 @@ The whole app is a single `index.html`, with no build step.
 
 - **Connects to Sleeper by username.** Bench Boss loads your leagues, your roster and this week's opponent.
 - **Shows the whole league on one page.** A My matchup / Whole league switch at the top lists every matchup this week: both teams' live scores, projected finals and win chances, with a tap to see both lineups side by side. Standings are at the bottom.
+- **Analyzes your team and suggests trades.** A separate Trades page (the Trades button in the header) ranks your team at each position against the rest of your league, lists your needs and strengths, and suggests one-for-one trades that fill a need and also help the other team. A trade builder lets you pick players on both sides and see how each team's best weekly lineup changes. Values use the average Sleeper projection, with your league's scoring, over this week and the next 3.
 - **Gives each player a verdict and reason.** Every lineup and bench player gets a verdict (Start, Keep, Toss-up, Sit, Close, Bench or Out), along with a short reason for it.
 - **Shows exact live scores with projected finals.** Each player's live score appears in large type, with their projected final score underneath in smaller type.
 - **Puts both lineups side by side.** Your recommended lineup and your opponent's lineup sit next to each other, slot by slot, with live scores and projected finals.

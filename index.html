@@ -202,6 +202,31 @@
   .stand.you .nm { color: var(--forest); }
   @media (max-width: 640px) { .lg-row { grid-template-columns: 1fr 38px 1fr; gap: 6px; } .lg-big { font-size: 26px; } .stand .pf { display: none; } }
 
+  /* team analyzer + trades */
+  .hdr-r { display: flex; align-items: center; gap: 8px; }
+  #tradesBtn { padding: 7px 14px; font-size: 13px; background: var(--card); color: var(--brown); }
+  .page-h { margin: 0 0 16px; }
+  .page-h h1 { font-family: var(--serif); font-weight: 600; font-size: 28px; color: var(--brown); margin: 0 0 2px; letter-spacing: -.01em; }
+  .posgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+  .pos { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+  .pos.good { background: var(--forest-soft); border-color: transparent; }
+  .pos.bad { background: var(--clay-soft); border-color: transparent; }
+  .pos-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .pos-h b { font-family: var(--serif); font-size: 18px; color: var(--brown); }
+  .pos-h span { font-weight: 700; font-size: 13px; }
+  .pos.good .pos-h span { color: var(--forest); }
+  .pos.bad .pos-h span { color: var(--bad); }
+  .trade { padding: 12px 0; border-top: 1px solid var(--line); }
+  .tr-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 3px; }
+  .tr-k { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--bad); min-width: 34px; }
+  .tr-k.get { color: var(--forest); }
+  .trade .pill { margin-left: auto; }
+  .tsel { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; width: 100%; max-width: 360px; }
+  .tpick { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink); padding: 8px 6px; font: inherit; font-size: 14px; border-radius: 0; }
+  .tpick.on { background: var(--forest-soft); }
+  .tpick .tp-v { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  @media (max-width: 640px) { .seg { width: 100%; } .seg-b { flex: 1; padding: 8px 6px; font-size: 13px; } }
+
   /* bench, both teams */
   .bcols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
   .bcols.solo { grid-template-columns: 1fr; }
@@ -286,7 +311,8 @@
       </svg>
       <span>Bench Boss</span>
     </div>
-    <div id="userChip" class="chip hidden"><span id="userName"></span><button id="switchBtn" type="button">Switch</button></div>
+    <div class="hdr-r"><button id="tradesBtn" class="pill hidden" type="button">Trades</button>
+    <div id="userChip" class="chip hidden"><span id="userName"></span><button id="switchBtn" type="button">Switch</button></div></div>
   </header>
 
   <section id="connect" class="hero">
@@ -679,6 +705,8 @@ function enterApp() {
   renderTabs();
   openLeague(state.leagues[0].league_id);
 }
+$('tradesBtn').addEventListener('click', () => { location.hash = onTrades() ? '' : '#trades'; });
+addEventListener('hashchange', () => { if (state.data) { render(state.data); scrollTo({ top: 0 }); } });
 $('watchBtn').addEventListener('click', () => {
   store($('watchBtn').dataset.seen, Date.now());
   $('watchCount').classList.add('hidden');
@@ -688,7 +716,7 @@ $('watchClose').addEventListener('click', () => $('watchDlg').close());
 $('watchDlg').addEventListener('click', (e) => { if (e.target === $('watchDlg')) $('watchDlg').close(); });   // tap outside to close
 $('switchBtn').addEventListener('click', () => {
   stopPoll();
-  $('watchBtn').classList.add('hidden');
+  $('watchBtn').classList.add('hidden'); $('tradesBtn').classList.add('hidden');
   $('connect').classList.remove('hidden');
   ['tabs', 'leagueView', 'userChip'].forEach((id) => $(id).classList.add('hidden'));
   $('username').focus();
@@ -992,6 +1020,8 @@ function fold(key, label, kids, first) {
 
 // "My matchup" vs "Whole league" switch at the top of a league.
 state.view = load('bb_view') === 'league' ? 'league' : 'mine';
+// Trades is its own page (#trades), separate from the matchup views.
+const onTrades = () => location.hash === '#trades';
 function viewSwitch() {
   const b = (key, label) => el('button', { type: 'button', class: 'seg-b' + (state.view === key ? ' on' : ''), 'aria-pressed': String(state.view === key), text: label,
     onclick: () => { if (state.view === key) return; state.view = key; store('bb_view', key); render(state.data); scrollTo({ top: 0, behavior: 'smooth' }); } });
@@ -1047,6 +1077,137 @@ function leagueOverview(d, { base, ev, slots, wk, srcs, mine, tidx }) {
     table.map((r, i) => el('div', { class: 'stand' + (r.roster_id === mine.roster_id ? ' you' : '') },
       el('span', { class: 'rk', text: i + 1 }), el('span', { class: 'nm', text: teamName(r, users) }),
       el('span', { class: 'rec', text: record(r) }), el('span', { class: 'pf', text: fpts(r) ? `${f1(fpts(r))} pts` : '' })))));
+  return box;
+}
+
+// ---------------- team analyzer + trades ----------------
+// Trade value = average weekly Sleeper projection (league scoring) over this week and the next 3; byes count as 0.
+const ROS_WEEKS = 4;
+async function loadRos(d) {
+  if (d.ros || d.rosLoading) return;
+  d.rosLoading = true;
+  const season = state.nfl.season, scoring = d.league.scoring_settings || {};
+  const weeks = Array.from({ length: ROS_WEEKS }, (_, i) => state.week + i).filter((w) => w <= 18);
+  const res = await Promise.allSettled(weeks.map((w) => (w === state.week && d.sleeper ? Promise.resolve(d.sleeper) : getSleeperProj(season, w, scoring))));
+  const got = res.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+  const val = {};
+  for (const wk of got) for (const [id, v] of Object.entries(wk)) val[id] = (val[id] || 0) + v.pts;
+  for (const id in val) val[id] /= Math.max(1, got.length);
+  d.ros = { val, weeks: got.length };
+  d.rosLoading = false;
+  if (state.data === d && onTrades()) render(d);
+}
+const TPOS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+const LONG_OUT = /^(ir|pup|sus|out)/i;
+function rosPlayer(id, d) {
+  const db = d.players[id] || {};
+  return { id, name: db.n || id, pos: db.p, team: db.t, mean: d.ros.val[id] || 0, sd: 0, started: false, unavailable: /^(ir|pup|sus)/i.test(db.i || ''), status: db.i || '' };
+}
+const lineupValue = (slots, pool) => { const l = fill(slots, pool, slots.map(() => null), (p) => p.mean); return { l, v: totals(l).mu }; };
+const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th');
+
+function teamAnalyzer(d, { slots, mine }) {
+  const box = el('div');
+  if (!d.ros) {
+    loadRos(d);
+    box.append(el('div', { class: 'card' }, el('div', { class: 'pm', text: 'Loading projections for the next few weeks…' })), el('div', { class: 'skel' }));
+    return box;
+  }
+  const { rosters, users } = d;
+  const teams = rosters.map((r) => {
+    const pool = (r.players || []).filter((id) => !(r.taxi || []).includes(id)).map((id) => rosPlayer(id, d));
+    const { l, v } = lineupValue(slots, pool);
+    const starterIds = new Set(l.filter(Boolean).map((p) => p.id));
+    const byPos = {};
+    for (const pos of TPOS) {
+      const st = l.filter((p) => p && p.pos === pos);
+      const bench = pool.filter((p) => p.pos === pos && !starterIds.has(p.id) && !p.unavailable).sort((a, b) => b.mean - a.mean);
+      byPos[pos] = { start: st.reduce((a, p) => a + p.mean, 0), n: st.length, bench, depth: bench[0]?.mean || 0 };
+    }
+    return { r, name: teamName(r, users), pool, l, v, byPos, mine: r.roster_id === mine.roster_id };
+  });
+  const me = teams.find((t) => t.mine);
+  const N = teams.length;
+  // League rank at each position (starting production + a little credit for depth).
+  const score = (t, pos) => t.byPos[pos].start + 0.25 * t.byPos[pos].depth;
+  const rank = {};
+  for (const pos of TPOS) {
+    rank[pos] = 1 + teams.filter((t) => score(t, pos) > score(me, pos) + 0.05).length;   // ties share a rank
+  }
+  const usedPos = TPOS.filter((pos) => slots.includes(pos));      // positions with their own lineup slot
+  const needs = usedPos.filter((pos) => rank[pos] > Math.ceil(N * 0.6)).sort((a, b) => rank[b] - rank[a]);
+  const strengths = usedPos.filter((pos) => rank[pos] <= Math.ceil(N * 0.34));
+  const overall = [...teams].sort((a, b) => b.v - a.v).findIndex((t) => t.mine) + 1;
+
+  // ----- team card -----
+  const card = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Your team' }), el('span', { class: 'label', text: `${ordinal(overall)} of ${N} by lineup strength` })));
+  card.append(el('div', { class: 'pm', style: 'margin-bottom:12px', text: `Best lineup projects ${f1(me.v)} pts/week over the next ${d.ros.weeks} week${d.ros.weeks > 1 ? 's' : ''} (Sleeper projections, your scoring).` }));
+  card.append(el('div', { class: 'posgrid' }, usedPos.map((pos) => {
+    const rk = rank[pos], cls = rk <= Math.ceil(N * 0.34) ? 'good' : rk > Math.ceil(N * 0.6) ? 'bad' : '';
+    const b = me.byPos[pos];
+    return el('div', { class: 'pos ' + cls },
+      el('div', { class: 'pos-h' }, el('b', { text: pos }), el('span', { text: ordinal(rk) })),
+      el('div', { class: 'pm', text: `Starters ${f1(b.start)}/wk` }),
+      el('div', { class: 'pm', text: b.bench[0] ? `Depth: ${b.bench[0].name} ${f1(b.depth)}` : 'No depth' }));
+  })));
+  card.append(el('div', { class: 'insight' + (needs.length ? ' warn' : ''), style: 'margin-top:14px' },
+    needs.length ? `Needs: ${needs.map((p) => `${p} (${ordinal(rank[p])})`).join(', ')}. ` : 'No weak spots compared with your league. ',
+    strengths.length ? `Strengths: ${strengths.map((p) => `${p} (${ordinal(rank[p])})`).join(', ')}.` : ''));
+  box.append(card);
+
+  // ----- suggested trades: 1-for-1, fills a need, both lineups improve -----
+  const trades = [];
+  const others = teams.filter((t) => !t.mine);
+  const mineGive = me.pool.filter((p) => !p.unavailable && p.mean > 0);
+  for (const t of others) for (const g of mineGive) for (const r of t.pool) {
+    if (r.unavailable || r.mean <= 0 || (needs.length && !needs.includes(r.pos))) continue;
+    if (!needs.length && r.pos === g.pos) continue;
+    const myNew = lineupValue(slots, [...me.pool.filter((p) => p.id !== g.id), r]).v - me.v;
+    if (myNew < 0.8) continue;
+    const theirNew = lineupValue(slots, [...t.pool.filter((p) => p.id !== r.id), g]).v - t.v;
+    if (theirNew < -0.3) continue;
+    trades.push({ t, g, r, myNew, theirNew, score: myNew + Math.min(theirNew, 2) });
+  }
+  trades.sort((a, b) => b.score - a.score);
+  const seen = new Set(), top = [];
+  for (const x of trades) { const k = x.r.id; if (seen.has(k) || seen.has('g' + x.g.id) && top.filter((y) => y.g.id === x.g.id).length >= 2) continue; seen.add(k); seen.add('g' + x.g.id); top.push(x); if (top.length >= 6) break; }
+  const tc = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Trade ideas' }), el('span', { class: 'label', text: needs.length ? `For ${needs.join(', ')}` : 'Upgrades' })));
+  if (!top.length) tc.append(el('div', { class: 'pm', text: 'No one-for-one trade found that clearly helps both teams. Try the trade builder below for bigger deals.' }));
+  for (const x of top) tc.append(el('div', { class: 'trade' },
+    el('div', { class: 'tr-line' }, el('span', { class: 'tr-k', text: 'Give' }), el('b', { text: x.g.name }), el('span', { class: 'pm', text: ` ${x.g.pos} · ${f1(x.g.mean)}/wk` })),
+    el('div', { class: 'tr-line' }, el('span', { class: 'tr-k get', text: 'Get' }), el('b', { text: x.r.name }), el('span', { class: 'pm', text: ` ${x.r.pos} · ${f1(x.r.mean)}/wk · from ${x.t.name}` })),
+    el('div', { class: 'chips' }, el('span', { class: 'sc good', text: `You +${f1(x.myNew)}/wk` }),
+      el('span', { class: 'sc ' + (x.theirNew >= 0 ? 'good' : 'warn'), text: `${x.t.name} ${x.theirNew >= 0 ? '+' : ''}${f1(x.theirNew)}/wk` }),
+      el('button', { type: 'button', class: 'pill', text: 'Open in builder', onclick: () => { state.trade = { rid: x.t.r.roster_id, give: new Set([x.g.id]), get: new Set([x.r.id]) }; render(state.data); document.getElementById('builder')?.scrollIntoView({ behavior: 'smooth' }); } }))));
+  box.append(tc);
+
+  // ----- trade builder -----
+  const tr = state.trade && others.some((t) => t.r.roster_id === state.trade.rid) ? state.trade : (state.trade = { rid: others[0]?.r.roster_id, give: new Set(), get: new Set() });
+  const them = others.find((t) => t.r.roster_id === tr.rid);
+  const bc = el('div', { class: 'card', id: 'builder' }, el('div', { class: 'card-h' }, el('h2', { text: 'Trade builder' }), el('span', { class: 'label', text: 'Tap players to add' })));
+  if (them) {
+    const sel = el('select', { class: 'tsel', 'aria-label': 'Trade partner', onchange: (e) => { state.trade = { rid: Number(e.target.value), give: new Set(), get: new Set() }; render(state.data); } },
+      others.map((t) => { const o = el('option', { value: t.r.roster_id, text: t.name }); if (t.r.roster_id === tr.rid) o.selected = true; return o; }));
+    bc.append(el('div', { style: 'margin-bottom:12px' }, sel));
+    const list = (t, set, label) => el('div', { class: 'bcol' }, el('div', { class: 'bhead' }, el('b', { text: label }), el('span', { text: `${set.size} selected` })),
+      [...t.pool].sort((a, b) => TPOS.indexOf(a.pos) - TPOS.indexOf(b.pos) || b.mean - a.mean).map((p) => el('button', { type: 'button', class: 'tpick' + (set.has(p.id) ? ' on' : ''), 'aria-pressed': String(set.has(p.id)),
+        onclick: () => { set.has(p.id) ? set.delete(p.id) : set.add(p.id); render(state.data); } },
+        el('span', { class: 'slot', text: p.pos || '-' }), el('span', { class: 'tp-n', text: p.name + (p.status ? ` (${p.status})` : '') }), el('span', { class: 'tp-v', text: f1(p.mean) }))));
+    bc.append(el('div', { class: 'bcols' }, list(me, tr.give, 'You give'), list(them, tr.get, `You get from ${them.name}`)));
+    if (tr.give.size || tr.get.size) {
+      const giveP = me.pool.filter((p) => tr.give.has(p.id)), getP = them.pool.filter((p) => tr.get.has(p.id));
+      const myD = lineupValue(slots, [...me.pool.filter((p) => !tr.give.has(p.id)), ...getP]).v - me.v;
+      const thD = lineupValue(slots, [...them.pool.filter((p) => !tr.get.has(p.id)), ...giveP]).v - them.v;
+      const verdict = myD > 0.5 && thD >= 0 ? 'Good for both teams, so a realistic offer.'
+        : myD > 0.5 ? `Helps you, but ${them.name} loses lineup value, so they may say no.`
+        : myD < -0.5 ? 'This makes your weekly lineup weaker.' : 'About even for your lineup.';
+      bc.append(el('div', { class: 'insight' + (myD > 0.5 ? '' : ' warn'), style: 'margin-top:14px' },
+        el('div', {}, 'Your lineup ', el('b', { text: `${myD >= 0 ? '+' : ''}${f1(myD)} pts/wk` }), ` · ${them.name} `, el('b', { text: `${thD >= 0 ? '+' : ''}${f1(thD)} pts/wk` })),
+        el('div', { style: 'margin-top:4px', text: verdict })));
+    }
+  }
+  box.append(bc);
+  box.append(el('p', { class: 'pm', style: 'text-align:center', text: `Values are average projected points per week for the next ${d.ros.weeks} weeks. Lineup change = how much each team's best possible starting lineup gains or loses. Roster limits and future byes beyond that window aren't considered.` }));
   return box;
 }
 
@@ -1323,7 +1484,12 @@ function render(d) {
     el('p', { text: "Watch compares each refresh with the last one and logs injury status changes (yours and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. Injury statuses refresh about every 30 minutes. Alerts only work while this page is open in a tab; it keeps checking in the background when alerts are on." }),
     el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Snap share is the player's share of their team's offensive snaps over the last 3 games, from Sleeper's weekly stats; under 40% is flagged. Roles (WR1, WR2…) rank teammates at the same position by recent snap share, using Sleeper's depth chart where snaps are missing. When a teammate who plays a real role is out or doubtful, the player is flagged for more opportunity; this is a note, not a projection change, because Sleeper and ESPN already adjust for announced injuries. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
   view.append(lower);
-  if (state.view === 'league') view.replaceChildren(viewSwitch(), leagueOverview(d, { base, ev, slots, wk, srcs, mine, tidx }));
+  $('tradesBtn').classList.remove('hidden');
+  $('tradesBtn').textContent = onTrades() ? '← Lineup' : 'Trades';
+  $('watchBtn').classList.toggle('hidden', onTrades());
+  if (onTrades()) view.replaceChildren(el('div', { class: 'page-h' }, el('h1', { text: 'Trade analyzer' }),
+    el('p', { class: 'pm', text: `${league.name || 'Your league'} · based on what your team needs` })), teamAnalyzer(d, { slots, mine }));
+  else if (state.view === 'league') view.replaceChildren(viewSwitch(), leagueOverview(d, { base, ev, slots, wk, srcs, mine, tidx }));
   else view.prepend(viewSwitch());
 }
 
