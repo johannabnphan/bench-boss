@@ -9,30 +9,25 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #f8f7f2;
-    --card: #fffefb;
-    --ink: #17241d;
-    --muted: #78857c;
-    --line: #e9e6dc;
-    --forest: #36906b;          /* lighter green */
-    --forest-2: #5aae8c;
-    --forest-soft: #e8f4ed;
-    --gold: #b58b2f;
-    --gold-soft: #f8f0dd;
+    --bg: #ffffff;
+    --card: #ffffff;
+    --ink: #2e2219;             /* dark brown text */
+    --muted: #8a7a6c;
+    --line: #eee6dd;
+    --brown: #7a4f2e;
+    --brown-soft: #f7f0e8;
+    --forest: #3f9a45;          /* grass green: actions and positives */
+    --forest-2: #7bbf5f;
+    --forest-soft: #eef7ea;
+    --gold: #a26a3a;            /* warm brown: swaps and highlights */
+    --gold-soft: #f8efe5;
     --clay: #c4673f;
-    --clay-soft: #f8e6dc;
+    --clay-soft: #f9e8df;
     --bad: #b8483a;
-    --shadow: 0 1px 1px rgba(22,34,27,.04), 0 10px 30px -12px rgba(22,34,27,.14);
+    --shadow: 0 1px 2px rgba(70,45,25,.05), 0 8px 24px -14px rgba(70,45,25,.18);
     --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
     --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0b130f; --card: #121d17; --ink: #eef2ec; --muted: #8d9a91; --line: #223028;
-      --forest: #72cfa6; --forest-2: #4fb48a; --forest-soft: #16291f;
-      --gold: #d8b05a; --gold-soft: #2b2415; --clay: #e08a63; --clay-soft: #33231b;
-      --shadow: 0 10px 30px -12px rgba(0,0,0,.6);
-    }
+    color-scheme: light;
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
@@ -42,22 +37,21 @@
   .muted { color: var(--muted); }
 
   .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 26px; }
-  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-weight: 600; font-size: 21px; letter-spacing: -.01em; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--brown); font-family: var(--serif); font-weight: 600; font-size: 21px; letter-spacing: -.01em; }
   .brand svg { width: 30px; height: 30px; }
   .chip { display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line); background: var(--card);
           border-radius: 999px; padding: 5px 6px 5px 14px; font-size: 13.5px; font-weight: 500; }
   .chip button { border: 0; background: var(--forest-soft); color: var(--forest); border-radius: 999px; padding: 4px 11px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 
   .hero { border: 1px solid var(--line); border-radius: 28px; padding: 46px 34px 38px; box-shadow: var(--shadow);
-          background: radial-gradient(900px 300px at 90% -20%, var(--forest-soft), transparent 70%), var(--card); }
-  .eyebrow { font-size: 11.5px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--forest); margin-bottom: 14px; }
+          background: radial-gradient(900px 300px at 90% -20%, var(--brown-soft), transparent 70%), var(--card); }
+  .eyebrow { font-size: 11.5px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--brown); margin-bottom: 14px; }
   .hero h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(30px, 6vw, 46px); line-height: 1.08; letter-spacing: -.02em; margin: 0 0 14px; max-width: 560px; }
   .hero p { color: var(--muted); max-width: 470px; margin: 0 0 26px; }
   .hero form { display: flex; gap: 10px; flex-wrap: wrap; max-width: 480px; }
   .hero input { flex: 1 1 200px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 14px; padding: 14px 16px; font: inherit; }
   .hero input:focus { outline: 2px solid var(--forest); outline-offset: 1px; }
   .btn { border: 0; border-radius: 14px; padding: 14px 24px; font: inherit; font-weight: 600; cursor: pointer; background: var(--forest); color: #fff; }
-  @media (prefers-color-scheme: dark) { .btn { color: #07140d; } }
   .btn:disabled { opacity: .6; cursor: wait; }
   #status { margin: 14px 0 0; min-height: 20px; font-size: 14px; color: var(--muted); }
   #status.err { color: var(--bad); font-weight: 500; }
@@ -70,8 +64,8 @@
 
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 22px; margin-bottom: 18px; box-shadow: var(--shadow); }
   .card-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; }
-  .card-h h2 { font-family: var(--serif); font-weight: 600; font-size: 21px; margin: 0; letter-spacing: -.01em; }
-  .label { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .card-h h2 { font-family: var(--serif); font-weight: 600; font-size: 21px; margin: 0; color: var(--brown); letter-spacing: -.01em; }
+  .label { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
 
   /* live bar */
   .livebar { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
@@ -87,7 +81,7 @@
   .wk { display: flex; align-items: center; gap: 8px; }
   .wk button { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; font-size: 15px; }
   .wk button:disabled { opacity: .3; cursor: default; }
-  .wk b { font-family: var(--serif); font-weight: 600; font-size: 17px; min-width: 72px; text-align: center; }
+  .wk b { font-family: var(--serif); font-weight: 600; font-size: 17px; color: var(--brown); min-width: 72px; text-align: center; }
   .sources { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   .src { font-size: 11.5px; font-weight: 500; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
   .src.ok { color: var(--forest); background: var(--forest-soft); border-color: transparent; }
@@ -110,7 +104,7 @@
   .row { display: grid; grid-template-columns: 50px 1fr auto; gap: 14px; align-items: center; padding: 13px 0; border-top: 1px solid var(--line); }
   .row.first { border-top: 0; }
   .row.swap { background: linear-gradient(90deg, var(--gold-soft), transparent 70%); margin: 0 -22px; padding: 14px 22px; border-left: 3px solid var(--gold); }
-  .slot { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--forest); border: 1px solid var(--line); border-radius: 8px; padding: 4px 0; text-align: center; background: var(--card); }
+  .slot { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--brown); border: 1px solid transparent; border-radius: 8px; padding: 4px 0; text-align: center; background: var(--brown-soft); }
   .pn { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .pm { font-size: 12.5px; color: var(--muted); }
   .why { font-size: 13px; margin-top: 6px; }
@@ -129,10 +123,8 @@
   .badge.bench { background: var(--line); color: var(--muted); }
   .card > details.fold:first-child { border-top: 0; margin-top: 0; }
   .mini .badge { margin-left: 8px; vertical-align: 1px; }
-  @media (prefers-color-scheme: dark) { .badge.d { background: #3a2a18; color: #f0a05c; } }
   .badge.live { background: #fde7e5; color: #c8423a; }
   .badge.fin { background: var(--line); color: var(--muted); }
-  @media (prefers-color-scheme: dark) { .badge.live { background: #3a1f1d; color: #ff8a80; } }
   .pr { text-align: right; }
   .pr .v { font-family: var(--serif); font-weight: 600; font-size: 20px; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
   .pr .rg { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
@@ -182,13 +174,12 @@
   /* watch */
   .fab { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5; display: inline-flex; align-items: center; gap: 8px;
          border: 0; border-radius: 999px; padding: 12px 18px; font: inherit; font-weight: 600; cursor: pointer; background: var(--forest); color: #fff; box-shadow: 0 8px 24px -8px rgba(0,0,0,.4); }
-  @media (prefers-color-scheme: dark) { .fab { color: #07140d; } }
   .fab .count { background: var(--bad); color: #fff; border-radius: 999px; min-width: 20px; padding: 1px 6px; font-size: 12px; text-align: center; }
   dialog#watchDlg { border: 0; padding: 0; background: transparent; color: var(--ink); width: min(560px, calc(100vw - 24px)); max-height: 82vh; }
-  dialog#watchDlg::backdrop { background: rgba(10,18,14,.45); }
+  dialog#watchDlg::backdrop { background: rgba(60,40,25,.35); }
   .dlg { background: var(--card); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow); display: flex; flex-direction: column; max-height: 82vh; }
   .dlg-h { display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
-  .dlg-h h2 { font-family: var(--serif); font-weight: 600; font-size: 21px; margin: 0; margin-right: auto; }
+  .dlg-h h2 { font-family: var(--serif); font-weight: 600; font-size: 21px; margin: 0; color: var(--brown); margin-right: auto; }
   .dlg-b { overflow-y: auto; padding: 14px 18px 18px; }
   .x { border: 0; background: transparent; color: var(--muted); font-size: 26px; line-height: 1; cursor: pointer; padding: 0 4px; }
   @media (max-width: 560px) {                       /* bottom sheet on phones */
@@ -221,9 +212,9 @@
   <header class="top">
     <div class="brand">
       <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <ellipse cx="16" cy="16" rx="14" ry="8.5" transform="rotate(-35 16 16)" stroke="currentColor" stroke-width="1.8" style="color:var(--forest)"/>
-        <path d="M9 23 L23 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" style="color:var(--forest)"/>
-        <path d="M13 17.5l-2 2M16 14.5l-2 2M19 11.5l-2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="color:var(--gold)"/>
+        <ellipse cx="16" cy="16" rx="14" ry="8.5" transform="rotate(-35 16 16)" stroke="currentColor" stroke-width="1.8" style="color:var(--brown)"/>
+        <path d="M9 23 L23 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" style="color:var(--brown)"/>
+        <path d="M13 17.5l-2 2M16 14.5l-2 2M19 11.5l-2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="color:var(--forest)"/>
       </svg>
       <span>Bench Boss</span>
     </div>
