@@ -231,6 +231,8 @@
   .tpick.on { background: var(--forest-soft); }
   .tp-n { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
   .tp-b { font-size: 11px; color: var(--forest); }
+  .seg-sm { margin-bottom: 14px; }
+  .seg-sm .seg-b { font-size: 13px; padding: 7px 13px; }
   .tpick .tp-v { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
   @media (max-width: 640px) { .seg { width: 100%; } .seg-b { flex: 1; padding: 8px 6px; font-size: 13px; } }
 
@@ -1376,26 +1378,64 @@ function scheduleCard(d, { mine }) {
 
 // ---------------- team analyzer + trades ----------------
 // Trade value = average weekly Sleeper projection (league scoring) over this week and the next 3; byes count as 0.
-const ROS_WEEKS = 4;
-async function loadRos(d) {
-  if (d.ros || d.rosLoading) return;
-  d.rosLoading = true;
+// Horizons: next 4 weeks, rest of season, or the fantasy playoff weeks (from league settings).
+const HORIZONS = { next4: 'Next 4 weeks', ros: 'Rest of season', playoffs: 'Fantasy playoffs' };
+state.horizon = HORIZONS[load('bb_horizon')] ? load('bb_horizon') : 'ros';
+function horizonWeeks(d) {
+  const now = state.week;
+  const ps = Number(d.league.settings?.playoff_week_start) || 15;
+  const last = Math.min(18, ps + 2);
+  const range = (a, b) => Array.from({ length: Math.max(0, b - a + 1) }, (_, i) => a + i);
+  if (state.horizon === 'next4') return range(now, Math.min(last, now + 3));
+  if (state.horizon === 'playoffs') return range(Math.max(now, ps), last);
+  return range(now, last);
+}
+// Weekly Sleeper projections (league scoring incl. bonuses), fetched once per week and kept on the league data.
+async function loadProjWeeks(d, weeks) {
+  d.projWeeks ||= {};
+  const need = weeks.filter((w) => !(w in d.projWeeks));
+  if (!need.length || d.projLoading) return;
+  d.projLoading = true;
   const season = state.nfl.season, scoring = d.league.scoring_settings || {};
-  const weeks = Array.from({ length: ROS_WEEKS }, (_, i) => state.week + i).filter((w) => w <= 18);
-  const res = await Promise.allSettled(weeks.map((w) => (w === state.week && d.sleeper ? Promise.resolve(d.sleeper) : getSleeperProj(season, w, scoring))));
-  const got = res.filter((r) => r.status === 'fulfilled').map((r) => r.value);
-  const val = {}, bonus = {};
-  for (const wk of got) for (const [id, v] of Object.entries(wk)) { val[id] = (val[id] || 0) + v.pts; bonus[id] = (bonus[id] || 0) + (v.bonus?.total || 0); }
-  for (const id in val) { val[id] /= Math.max(1, got.length); bonus[id] /= Math.max(1, got.length); }
-  d.ros = { val, bonus, weeks: got.length };
-  d.rosLoading = false;
+  const res = await Promise.allSettled(need.map((w) => (w === state.week && d.sleeper ? Promise.resolve(d.sleeper) : getSleeperProj(season, w, scoring))));
+  need.forEach((w, i) => { d.projWeeks[w] = res[i].status === 'fulfilled' ? res[i].value : null; });
+  d.projLoading = false;
   if (state.data === d && onTrades()) render(d);
+}
+// Per-player value over the horizon: average points per week (byes count as 0). From 2 weeks out, each week is nudged
+// by the opponent's defense rating (Sleeper's far-out projections mostly ignore matchups), at most ±20%.
+function rosCalc(d, weeks) {
+  const got = weeks.filter((w) => d.projWeeks?.[w]);
+  const def = d.def;
+  const avgPg = {};
+  if (def) for (const pos of DPOS) { const l = Object.values(def.rank[pos] || {}); if (l.length) avgPg[pos] = avg(l.map((x) => x.pg)); }
+  const val = {}, bonus = {}, ease = {}, byes = {};
+  const ids = new Set(got.flatMap((w) => Object.keys(d.projWeeks[w])));
+  for (const id of ids) {
+    const pos = d.players[id]?.p;
+    let sum = 0, b = 0, e = [], bye = 0;
+    for (const w of got) {
+      const p = d.projWeeks[w][id];
+      if (!p) { bye++; continue; }
+      let f = 1;
+      const dr = def && p.opp && DPOS.includes(pos) ? def.rank[pos]?.[p.opp] : null;
+      if (dr) {
+        e.push(1 - (dr.r - 1) / (dr.n - 1 || 1));
+        if (w >= state.week + 2 && avgPg[pos]) f = Math.max(0.8, Math.min(1.2, 1 + 0.5 * (dr.pg / avgPg[pos] - 1)));
+      }
+      sum += p.pts * f; b += (p.bonus?.total || 0) * f;
+    }
+    val[id] = sum / got.length; bonus[id] = b / got.length;
+    if (e.length) ease[id] = avg(e);
+    byes[id] = bye;
+  }
+  return { val, bonus, ease, byes, weeks: got.length, first: got[0], last: got[got.length - 1], adjusted: !!def };
 }
 const TPOS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
 const LONG_OUT = /^(ir|pup|sus|out)/i;
 function rosPlayer(id, d) {
   const db = d.players[id] || {};
-  const p = { id, name: db.n || id, pos: db.p, team: db.t, mean: d.ros.val[id] || 0, bonus: d.ros.bonus[id] || 0, sd: 0, started: false, unavailable: /^(ir|pup|sus)/i.test(db.i || ''), status: db.i || '' };
+  const p = { id, name: db.n || id, pos: db.p, team: db.t, mean: d.ros.val[id] || 0, bonus: d.ros.bonus[id] || 0, ease: d.ros.ease[id], byes: d.ros.byes[id] || 0, sd: 0, started: false, unavailable: /^(ir|pup|sus)/i.test(db.i || ''), status: db.i || '' };
   // Trade value (0-100): same blend as the weekly value, but the projection part uses the 4-week average.
   if (state.baseCtx && d.rosRanks) {
     const e = evalPlayer(id, state.baseCtx);
@@ -1404,17 +1444,30 @@ function rosPlayer(id, d) {
   return p;
 }
 const valChip = (p) => (p.val ? el('span', { class: 'sc val g' + p.val.grade, text: `${p.val.v} · ${p.val.grade}`, title: 'Trade value (0–100): ' + p.val.parts.join(' · ') }) : null);
+const easeChip = (p) => (p.ease == null ? null : el('span', { class: 'sc ' + (p.ease >= 0.6 ? 'good' : p.ease < 0.4 ? 'bad' : ''), text: p.ease >= 0.6 ? 'Easy schedule' : p.ease < 0.4 ? 'Tough schedule' : 'Avg schedule',
+  title: `Average opponent defense rating over these weeks (${Math.round(p.ease * 100)}/100, higher = softer)${p.byes ? ` · ${p.byes} bye week${p.byes > 1 ? 's' : ''}` : ''}` }));
+const byeTxt = (p) => (p.byes ? ` · ${p.byes} bye${p.byes > 1 ? 's' : ''}` : '');
 const bonusTxt = (p) => (p.bonus >= 0.1 ? ` (incl. +${f1(p.bonus)} bonus)` : '');
 const lineupValue = (slots, pool) => { const l = fill(slots, pool, slots.map(() => null), (p) => p.mean); return { l, v: totals(l).mu }; };
 const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th');
 
 function teamAnalyzer(d, { slots, mine }) {
   const box = el('div');
-  if (!d.ros) {
-    loadRos(d);
-    box.append(el('div', { class: 'card' }, el('div', { class: 'pm', text: 'Loading projections for the next few weeks…' })), el('div', { class: 'skel' }));
+  // Horizon switch
+  const hz = el('div', { class: 'seg seg-sm' }, Object.entries(HORIZONS).map(([k, label]) => el('button', { type: 'button', class: 'seg-b' + (state.horizon === k ? ' on' : ''), 'aria-pressed': String(state.horizon === k), text: label,
+    onclick: () => { if (state.horizon === k) return; state.horizon = k; store('bb_horizon', k); render(state.data); } })));
+  box.append(hz);
+  const weeks = horizonWeeks(d);
+  if (!weeks.length) { box.append(el('div', { class: 'card pm', text: 'No weeks left in this horizon. Try Rest of season.' })); return box; }
+  loadDefense(d);                                   // schedule adjustment; re-renders when ready
+  if (weeks.some((w) => !(w in (d.projWeeks || {})))) {
+    loadProjWeeks(d, weeks);
+    box.append(el('div', { class: 'card' }, el('div', { class: 'pm', text: `Loading projections for weeks ${weeks[0]}–${weeks[weeks.length - 1]}…` })), el('div', { class: 'skel' }));
     return box;
   }
+  const hkey = state.horizon + ':' + weeks.join(',') + ':' + !!d.def;
+  if (d.rosKey !== hkey) { d.ros = rosCalc(d, weeks); d.rosKey = hkey; d.rosRanks = null; }
+  if (!d.ros.weeks) { box.append(el('div', { class: 'card pm', text: 'Sleeper has no projections for these weeks yet.' })); return box; }
   const { rosters, users } = d;
   d.rosRanks ||= posRanks(d.players, Object.fromEntries(Object.entries(d.ros.val).map(([id, v]) => [id, { pts: v }])), null);
   const teams = rosters.map((r) => {
@@ -1444,7 +1497,7 @@ function teamAnalyzer(d, { slots, mine }) {
 
   // ----- team card -----
   const card = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Your team' }), el('span', { class: 'label', text: `${ordinal(overall)} of ${N} by lineup strength` })));
-  card.append(el('div', { class: 'pm', style: 'margin-bottom:12px', text: `Best lineup projects ${f1(me.v)} pts/week over the next ${d.ros.weeks} week${d.ros.weeks > 1 ? 's' : ''} (Sleeper projections, your scoring).` }));
+  card.append(el('div', { class: 'pm', style: 'margin-bottom:12px', text: `${HORIZONS[state.horizon]} (weeks ${d.ros.first}–${d.ros.last}): your best lineup averages ${f1(me.v)} pts/week (Sleeper projections, your scoring${d.ros.adjusted ? ', adjusted for opponents' : ''}).` }));
   card.append(el('div', { class: 'posgrid' }, usedPos.map((pos) => {
     const rk = rank[pos], cls = rk <= Math.ceil(N * 0.34) ? 'good' : rk > Math.ceil(N * 0.6) ? 'bad' : '';
     const b = me.byPos[pos];
@@ -1477,8 +1530,8 @@ function teamAnalyzer(d, { slots, mine }) {
   const tc = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Trade ideas' }), el('span', { class: 'label', text: needs.length ? `For ${needs.join(', ')}` : 'Upgrades' })));
   if (!top.length) tc.append(el('div', { class: 'pm', text: 'No one-for-one trade found that clearly helps both teams. Try the trade builder below for bigger deals.' }));
   for (const x of top) tc.append(el('div', { class: 'trade' },
-    el('div', { class: 'tr-line' }, el('span', { class: 'tr-k', text: 'Give' }), el('b', { text: x.g.name }), valChip(x.g), el('span', { class: 'pm', text: ` ${x.g.pos} · ${f1(x.g.mean)}/wk${bonusTxt(x.g)}` })),
-    el('div', { class: 'tr-line' }, el('span', { class: 'tr-k get', text: 'Get' }), el('b', { text: x.r.name }), valChip(x.r), el('span', { class: 'pm', text: ` ${x.r.pos} · ${f1(x.r.mean)}/wk${bonusTxt(x.r)} · from ${x.t.name}` })),
+    el('div', { class: 'tr-line' }, el('span', { class: 'tr-k', text: 'Give' }), el('b', { text: x.g.name }), valChip(x.g), easeChip(x.g), el('span', { class: 'pm', text: ` ${x.g.pos} · ${f1(x.g.mean)}/wk${bonusTxt(x.g)}${byeTxt(x.g)}` })),
+    el('div', { class: 'tr-line' }, el('span', { class: 'tr-k get', text: 'Get' }), el('b', { text: x.r.name }), valChip(x.r), easeChip(x.r), el('span', { class: 'pm', text: ` ${x.r.pos} · ${f1(x.r.mean)}/wk${bonusTxt(x.r)}${byeTxt(x.r)} · from ${x.t.name}` })),
     el('div', { class: 'chips' }, el('span', { class: 'sc good', text: `You +${f1(x.myNew)}/wk` }),
       el('span', { class: 'sc ' + (x.theirNew >= 0 ? 'good' : 'warn'), text: `${x.t.name} ${x.theirNew >= 0 ? '+' : ''}${f1(x.theirNew)}/wk` }),
       el('button', { type: 'button', class: 'pill', text: 'Open in builder', onclick: () => { state.trade = { rid: x.t.r.roster_id, give: new Set([x.g.id]), get: new Set([x.r.id]) }; render(state.data); document.getElementById('builder')?.scrollIntoView({ behavior: 'smooth' }); } }))));
@@ -1496,8 +1549,8 @@ function teamAnalyzer(d, { slots, mine }) {
       [...t.pool].sort((a, b) => TPOS.indexOf(a.pos) - TPOS.indexOf(b.pos) || b.mean - a.mean).map((p) => el('button', { type: 'button', class: 'tpick' + (set.has(p.id) ? ' on' : ''), 'aria-pressed': String(set.has(p.id)),
         onclick: () => { set.has(p.id) ? set.delete(p.id) : set.add(p.id); render(state.data); } },
         el('span', { class: 'slot', text: p.pos || '-' }),
-        el('span', { class: 'tp-n' }, el('span', { text: p.name + (p.status ? ` (${p.status})` : '') }), valChip(p),
-          p.bonus >= 0.1 ? el('small', { class: 'tp-b', text: `+${f1(p.bonus)} bonus/wk` }) : null),
+        el('span', { class: 'tp-n' }, el('span', { text: p.name + (p.status ? ` (${p.status})` : '') }), valChip(p), easeChip(p),
+          p.bonus >= 0.1 || p.byes ? el('small', { class: 'tp-b', text: [p.bonus >= 0.1 ? `+${f1(p.bonus)} bonus/wk` : null, p.byes ? `${p.byes} bye${p.byes > 1 ? 's' : ''} left` : null].filter(Boolean).join(' · ') }) : null),
         el('span', { class: 'tp-v', text: f1(p.mean) + '/wk' }))));
     bc.append(el('div', { class: 'bcols' }, list(me, tr.give, 'You give'), list(them, tr.get, `You get from ${them.name}`)));
     if (tr.give.size || tr.get.size) {
@@ -1517,7 +1570,7 @@ function teamAnalyzer(d, { slots, mine }) {
     }
   }
   box.append(bc);
-  box.append(el('p', { class: 'pm', style: 'text-align:center', text: `Points are average projected points per week for the next ${d.ros.weeks} weeks, including your league's bonus scoring. Value (0–100) blends that projection's rank at the position with snap share, start %, Sleeper/ESPN agreement and add/drop trend. Lineup change = how much each team's best possible starting lineup gains or loses. Roster limits and future byes beyond that window aren't considered.` }));
+  box.append(el('p', { class: 'pm', style: 'text-align:center', text: `Points are average projected points per week over weeks ${d.ros.first}–${d.ros.last} (byes count as 0), including your league's bonus scoring${d.ros.adjusted ? ', with weeks 2+ out adjusted up to ±20% for the opponent\'s defense rating' : ''}. Value (0–100) blends that projection's rank at the position with snap share, start %, Sleeper/ESPN agreement and add/drop trend. Lineup change = how much each team's best possible starting lineup gains or loses. Roster limits and future byes beyond that window aren't considered.` }));
   return box;
 }
 
