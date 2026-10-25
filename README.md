@@ -7,6 +7,7 @@ The whole app is a single `index.html`, with no build step.
 ## What it does
 
 - **Connects to Sleeper by username.** Bench Boss loads your leagues, your roster and this week's opponent.
+- **Shows the whole league on one page.** A My matchup / Whole league switch at the top lists every matchup this week: both teams' live scores, projected finals and win chances, with a tap to see both lineups side by side. Standings are at the bottom.
 - **Gives each player a verdict and reason.** Every lineup and bench player gets a verdict (Start, Keep, Toss-up, Sit, Close, Bench or Out), along with a short reason for it.
 - **Shows exact live scores with projected finals.** Each player's live score appears in large type, with their projected final score underneath in smaller type.
 - **Puts both lineups side by side.** Your recommended lineup and your opponent's lineup sit next to each other, slot by slot, with live scores and projected finals.
@@ -17,7 +18,7 @@ The whole app is a single `index.html`, with no build step.
 - **Shows snap share.** Each player shows the share of their team's offensive snaps they played over the last 3 games, plus today's snap count during games. Players under 40% are flagged because they get fewer chances to score.
 - **Shows team roles and opportunity.** Each player gets a role like WR1 or RB2, ranked by recent snap share (Sleeper's depth chart fills gaps). When a teammate at the same position who usually plays is out or doubtful, the player is flagged for more snaps and touches. This is a note only, because Sleeper and ESPN projections already adjust for announced injuries.
 - **Keeps player details tidy.** Under each player: one line with the reason, a row of small chips (Sleeper and ESPN projections, whether the sources agree, role, snap share, start %, adds and drops), and short labelled notes for Game, Opportunity and Snaps.
-- **Has a bit of fun.** The cursor is a small football, and every minute or two a football is kicked through a goalpost. Tap the Bench Boss logo to kick one yourself. On phones, a little football pops wherever you tap. All of this is off when your device is set to reduce motion.
+- **Has a bit of fun.** The cursor is a small football, and every minute or two a football is kicked through a goalpost and "TD!" pops up. Tap the Bench Boss logo to kick one yourself. On phones, a little football pops wherever you tap. All of this is off when your device is set to reduce motion.
 - **Shows a Predicted winner line.** This line names the team expected to win the matchup, and by how much, using the combined Sleeper and ESPN projections.
 
 ## How it works

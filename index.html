@@ -171,6 +171,37 @@
     .slot { font-size: 10px; }
   }
 
+  /* view switch + league overview */
+  .seg { display: flex; gap: 4px; padding: 4px; background: var(--brown-soft); border-radius: 999px; margin-bottom: 16px; width: fit-content; }
+  .seg-b { border: 0; background: transparent; color: var(--brown); border-radius: 999px; padding: 8px 16px; font: inherit; font-size: 14px; font-weight: 600; }
+  .seg-b.on { background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
+  .lg.you { border-color: var(--forest-2); }
+  .lg-vs { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: end; }
+  .lg-vs .mid { padding-bottom: 22px; }
+  .lg-t .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lg-t .sub { font-size: 12.5px; color: var(--muted); }
+  .lg-t.r { text-align: right; }
+  .lg-big { font-family: var(--serif); font-weight: 600; font-size: 32px; line-height: 1.1; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .lg .prob { margin-top: 14px; }
+  .lg-more { margin-top: 10px; border-top: 1px solid var(--line); }
+  .lg-more summary { cursor: pointer; list-style: none; padding: 12px 0 4px; font-size: 13px; font-weight: 600; color: var(--brown); }
+  .lg-more summary::-webkit-details-marker { display: none; }
+  .lg-more summary::after { content: ' +'; color: var(--forest); }
+  .lg-more[open] summary::after { content: ' –'; }
+  .lg-row { display: grid; grid-template-columns: 1fr 46px 1fr; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+  .lg-row:first-of-type { border-top: 0; }
+  .lg-p { min-width: 0; }
+  .lg-p.r { text-align: right; }
+  .lg-p.r .pn { justify-content: flex-end; }
+  .lg-s { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lg-s b { color: var(--ink); font-weight: 600; }
+  .stand { display: grid; grid-template-columns: 28px 1fr auto auto; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .stand .rk { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stand .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stand .rec, .stand .pf { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stand.you .nm { color: var(--forest); }
+  @media (max-width: 640px) { .lg-row { grid-template-columns: 1fr 38px 1fr; gap: 6px; } .lg-big { font-size: 26px; } .stand .pf { display: none; } }
+
   /* bench, both teams */
   .bcols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
   .bcols.solo { grid-template-columns: 1fr; }
@@ -959,6 +990,66 @@ function fold(key, label, kids, first) {
   return d;
 }
 
+// "My matchup" vs "Whole league" switch at the top of a league.
+state.view = load('bb_view') === 'league' ? 'league' : 'mine';
+function viewSwitch() {
+  const b = (key, label) => el('button', { type: 'button', class: 'seg-b' + (state.view === key ? ' on' : ''), 'aria-pressed': String(state.view === key), text: label,
+    onclick: () => { if (state.view === key) return; state.view = key; store('bb_view', key); render(state.data); scrollTo({ top: 0, behavior: 'smooth' }); } });
+  return el('div', { class: 'seg' }, b('mine', 'My matchup'), b('league', 'Whole league'));
+}
+
+// Every matchup in the league this week on one page, with standings.
+function leagueOverview(d, { base, ev, slots, wk, srcs, mine, tidx }) {
+  const { rosters, users, matchups } = d;
+  const box = el('div');
+  const teams = {};
+  for (const r of rosters) {
+    const m = matchups.find((x) => x.roster_id === r.roster_id);
+    const ctx = { ...base, pts: m?.players_points || {} };
+    const lineup = (m?.starters || r.starters || []).map((id) => ev(id, ctx));
+    teams[r.roster_id] = { r, m, lineup, t: totals(lineup), name: teamName(r, users), mine: r.roster_id === mine.roster_id };
+  }
+  const groups = {};
+  for (const m of matchups) if (m.matchup_id != null) (groups[m.matchup_id] ||= []).push(teams[m.roster_id]);
+  const pairs = Object.values(groups).filter((g) => g.length === 2 && g[0] && g[1])
+    .sort((a, b) => (b[0].mine || b[1].mine) - (a[0].mine || a[1].mine));
+  for (const g of pairs) if (g[1].mine) g.reverse();          // you on the left
+  box.append(el('div', { class: 'card' }, el('div', { class: 'wkbar', style: 'margin:0' }, wk, srcs)));
+  if (!pairs.length) box.append(el('div', { class: 'card muted', text: 'No head-to-head matchups this week (bye, playoffs, or the season has not started).' }));
+  for (const [a, b] of pairs) {
+    const pa = winProb(a.t, b.t);
+    const done = [...a.lineup, ...b.lineup].filter(Boolean).every((p) => p.done) && !!d.games;
+    const side = (t, r) => el('div', { class: 'lg-t' + (r ? ' r' : '') },
+      el('div', { class: 'nm', text: t.name + (t.mine ? ' (you)' : '') }), el('div', { class: 'sub', text: record(t.r) }),
+      el('div', { class: 'lg-big', text: f2(t.m?.points ?? 0) }), el('div', { class: 'sub', text: `proj. ${f1(t.t.mu)}` }));
+    const rows = slots.map((s, i) => {
+      const cell = (p, r) => p ? el('div', { class: 'lg-p' + (r ? ' r' : '') },
+        el('div', { class: 'pn' }, el('span', { class: 'nmx', text: p.name }), p.final ? null : statusBadge(p)),
+        el('div', { class: 'pm', text: [p.pos, p.team || 'FA', p.started ? p.gameDetail : (p.opp ? 'vs ' + p.opp : null), roleInfo(p, tidx)?.role].filter(Boolean).join(' · ') }),
+        el('div', { class: 'lg-s' }, el('b', { text: f2(p.actual) }), ` · ${p.final ? 'final' : p.started ? 'proj. ' + f1(p.mean) : p.unavailable ? 'out' : 'proj. ' + f1(p.mean)}`))
+        : el('div', { class: 'lg-p' + (r ? ' r' : '') + ' pm', text: 'Empty' });
+      return el('div', { class: 'lg-row' }, cell(a.lineup[i], false), el('span', { class: 'slot', text: SLOT_LABEL[s] || s }), cell(b.lineup[i], true));
+    });
+    const det = el('details', { class: 'lg-more' }, el('summary', { text: 'Lineups' }), rows);
+    const key = 'lg:' + a.r.roster_id;
+    if (state.open.has(key)) det.open = true;
+    det.addEventListener('toggle', () => { det.open ? state.open.add(key) : state.open.delete(key); });
+    box.append(el('div', { class: 'card lg' + (a.mine || b.mine ? ' you' : '') },
+      el('div', { class: 'lg-vs' }, side(a, false), el('div', { class: 'mid', text: 'VS' }), side(b, true)),
+      el('div', { class: 'prob' }, el('div', { class: 'prob-bar' }, el('i', { style: `width:${Math.round(pa * 100)}%` })),
+        el('div', { class: 'prob-row' }, el('span', {}, done ? 'Final' : 'Win chance ', done ? '' : el('b', { text: pct(pa) })), done ? null : el('span', {}, el('b', { text: pct(1 - pa) })))),
+      det));
+  }
+  // Standings: wins, then points for.
+  const fpts = (r) => (r.settings.fpts || 0) + (r.settings.fpts_decimal || 0) / 100;
+  const table = [...rosters].sort((x, y) => (y.settings.wins - x.settings.wins) || (fpts(y) - fpts(x)));
+  box.append(el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Standings' }), el('span', { class: 'label', text: `${rosters.length} teams` })),
+    table.map((r, i) => el('div', { class: 'stand' + (r.roster_id === mine.roster_id ? ' you' : '') },
+      el('span', { class: 'rk', text: i + 1 }), el('span', { class: 'nm', text: teamName(r, users) }),
+      el('span', { class: 'rec', text: record(r) }), el('span', { class: 'pf', text: fpts(r) ? `${f1(fpts(r))} pts` : '' })))));
+  return box;
+}
+
 function render(d) {
   const { league, rosters, users, matchups, players, sleeper, espn, espnOwn, trend, starts, sleeperErr, espnErr, games } = d;
   const view = $('leagueView'); view.replaceChildren();
@@ -1232,6 +1323,8 @@ function render(d) {
     el('p', { text: "Watch compares each refresh with the last one and logs injury status changes (yours and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. Injury statuses refresh about every 30 minutes. Alerts only work while this page is open in a tab; it keeps checking in the background when alerts are on." }),
     el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Snap share is the player's share of their team's offensive snaps over the last 3 games, from Sleeper's weekly stats; under 40% is flagged. Roles (WR1, WR2…) rank teammates at the same position by recent snap share, using Sleeper's depth chart where snaps are missing. When a teammate who plays a real role is out or doubtful, the player is flagged for more opportunity; this is a note, not a projection change, because Sleeper and ESPN already adjust for announced injuries. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
   view.append(lower);
+  if (state.view === 'league') view.replaceChildren(viewSwitch(), leagueOverview(d, { base, ev, slots, wk, srcs, mine, tidx }));
+  else view.prepend(viewSwitch());
 }
 
 // ---------------- fun: a football kicked through the uprights now and then ----------------
@@ -1264,7 +1357,7 @@ function kick() {
   post.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 300, fill: 'forwards' });
   const fly = ball.animate(frames, { duration: 1700, easing: 'cubic-bezier(.3,.1,.5,1)', fill: 'forwards' });
   fly.onfinish = () => {
-    const good = el('div', { class: 'good', text: 'GOOD!', style: `left:${px + pw / 2 - 40}px;top:${py - 38}px` });
+    const good = el('div', { class: 'good', text: 'TD!', style: `left:${px + pw / 2 - 22}px;top:${py - 38}px` });
     layer().append(good);
     good.animate([{ opacity: 0, transform: 'scale(.6)' }, { opacity: 1, transform: 'scale(1.1)', offset: 0.3 }, { opacity: 1, transform: 'scale(1)', offset: 0.7 }, { opacity: 0, transform: 'translateY(-14px)' }], { duration: 1300, fill: 'forwards' }).onfinish = () => good.remove();
     post.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 600, delay: 900, fill: 'forwards' }).onfinish = () => post.remove();
