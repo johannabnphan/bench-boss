@@ -272,6 +272,11 @@
   .game .gs { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-top: 4px; }
 
   .lowsnap { color: var(--clay); }
+  .sc.val { font-weight: 700; }
+  .sc.val.gA { background: var(--forest); color: #fff; }
+  .sc.val.gB { background: var(--forest-soft); color: var(--forest); }
+  .sc.val.gC { background: var(--brown-soft); color: var(--brown); }
+  .sc.val.gD, .sc.val.gF { background: var(--clay-soft); color: var(--bad); }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
   .sc { font-size: 11.5px; font-weight: 500; padding: 2px 8px; border-radius: 999px; background: var(--brown-soft); color: var(--brown); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .sc.role { font-weight: 700; }
@@ -413,6 +418,62 @@ function leaguePts(stats, scoring, pos) {
   return preset ?? null;
 }
 
+// ---------------- bonus scoring ----------------
+// Sleeper scoring keys for bonuses. Projections give expected stats (yards, catches, TDs) but usually not bonus hits,
+// so we estimate the chance of each threshold and add the expected bonus points.
+const BONUS = [
+  { k: 'bonus_pass_yd_300', label: '300+ pass yds', stat: 'pass_yd', at: 300 },
+  { k: 'bonus_pass_yd_400', label: '400+ pass yds', stat: 'pass_yd', at: 400 },
+  { k: 'bonus_pass_cmp_25', label: '25+ completions', stat: 'pass_cmp', at: 25, sd: 0.2 },
+  { k: 'bonus_rush_yd_100', label: '100+ rush yds', stat: 'rush_yd', at: 100 },
+  { k: 'bonus_rush_yd_200', label: '200+ rush yds', stat: 'rush_yd', at: 200 },
+  { k: 'bonus_rush_att_20', label: '20+ carries', stat: 'rush_att', at: 20, sd: 0.25 },
+  { k: 'bonus_rec_yd_100', label: '100+ rec yds', stat: 'rec_yd', at: 100 },
+  { k: 'bonus_rec_yd_200', label: '200+ rec yds', stat: 'rec_yd', at: 200 },
+  { k: 'bonus_rush_rec_yd_100', label: '100+ scrimmage yds', stat: ['rush_yd', 'rec_yd'], at: 100 },
+  { k: 'bonus_rush_rec_yd_200', label: '200+ scrimmage yds', stat: ['rush_yd', 'rec_yd'], at: 200 },
+  // per-catch premiums by position
+  { k: 'bonus_rec_te', label: 'TE premium', per: 'rec', pos: 'TE' },
+  { k: 'bonus_rec_rb', label: 'RB catch bonus', per: 'rec', pos: 'RB' },
+  { k: 'bonus_rec_wr', label: 'WR catch bonus', per: 'rec', pos: 'WR' },
+  // first downs (estimated from catches / carries when not projected)
+  { k: 'bonus_fd_qb', label: 'QB first downs', per: 'pass_fd', est: (st) => (st.pass_cmp || 0) * 0.6, pos: 'QB' },
+  { k: 'bonus_fd_rb', label: 'RB first downs', per: 'rush_rec_fd', est: (st) => (st.rush_att || 0) * 0.22 + (st.rec || 0) * 0.45, pos: 'RB' },
+  { k: 'bonus_fd_wr', label: 'WR first downs', per: 'rec_fd', est: (st) => (st.rec || 0) * 0.6, pos: 'WR' },
+  { k: 'bonus_fd_te', label: 'TE first downs', per: 'rec_fd', est: (st) => (st.rec || 0) * 0.55, pos: 'TE' },
+  // long touchdowns: share of TDs that go 40+ / 50+ yards
+  { k: 'pass_td_40p', label: '40+ yd pass TD', per: 'pass_td', share: 0.10 },
+  { k: 'pass_td_50p', label: '50+ yd pass TD', per: 'pass_td', share: 0.06 },
+  { k: 'rush_td_40p', label: '40+ yd rush TD', per: 'rush_td', share: 0.06 },
+  { k: 'rush_td_50p', label: '50+ yd rush TD', per: 'rush_td', share: 0.04 },
+  { k: 'rec_td_40p', label: '40+ yd rec TD', per: 'rec_td', share: 0.14 },
+  { k: 'rec_td_50p', label: '50+ yd rec TD', per: 'rec_td', share: 0.09 },
+];
+// Common bonuses on Sleeper and ESPN, shown so you know what to look for in your league settings.
+const COMMON_BONUSES = ['100+ rush or rec yds (often +3)', '300+ pass yds (often +3)', '40+ or 50+ yd TDs (+1 to +2)', 'TE premium (+0.5 per catch)', 'First downs (+0.5 each)', '25+ completions or 20+ carries', 'Defense: shutouts / few points allowed, return TDs'];
+function bonusPts(stats, scoring, pos) {
+  const items = [];
+  for (const b of BONUS) {
+    const w = scoring[b.k];
+    if (typeof w !== 'number' || !w || typeof stats[b.k] === 'number') continue;     // not in league, or already projected
+    if (b.pos && b.pos !== pos) continue;
+    if (b.at) {
+      const mean = Array.isArray(b.stat) ? b.stat.reduce((a, k) => a + (stats[k] || 0), 0) : (stats[b.stat] || 0);
+      if (mean <= 0) continue;
+      const sd = mean * (b.sd ?? 0.42) + (b.sd ? 1 : 12);
+      const p = 1 - Phi((b.at - 0.5 - mean) / sd);
+      if (p >= 0.01) items.push({ label: b.label, w, chance: p, exp: w * p });
+    } else if (b.share) {
+      const td = stats[b.per] || 0; if (td <= 0) continue;
+      items.push({ label: b.label, w, chance: Math.min(1, td * b.share), exp: w * td * b.share });
+    } else {
+      const n = typeof stats[b.per] === 'number' ? stats[b.per] : b.est ? b.est(stats) : 0;
+      if (n > 0) items.push({ label: b.label, w, n, exp: w * n });
+    }
+  }
+  return { total: items.reduce((a, x) => a + x.exp, 0), items };
+}
+
 async function getSleeperProj(season, week, scoring) {
   const qs = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map((p) => `position[]=${p}`).join('&');
   const r = await fetch(`${PROJ}/${season}/${week}?season_type=regular&${qs}`);
@@ -421,8 +482,10 @@ async function getSleeperProj(season, week, scoring) {
   const out = {};
   for (const row of arr) {
     if (!row || !row.player_id || !row.stats) continue;
-    const pts = leaguePts(row.stats, scoring, row.player?.position);
-    if (typeof pts === 'number') out[row.player_id] = { pts, rec: row.stats.rec || 0, opp: row.opponent || null };
+    const pos = row.player?.position;
+    const pts = leaguePts(row.stats, scoring, pos);
+    const bonus = pos === 'K' || pos === 'DEF' ? { total: 0, items: [] } : bonusPts(row.stats, scoring, pos);
+    if (typeof pts === 'number') out[row.player_id] = { pts: pts + bonus.total, bonus, rec: row.stats.rec || 0, opp: row.opponent || null };
   }
   if (!Object.keys(out).length) throw new Error('No Sleeper projections for this week yet');
   return out;
@@ -557,7 +620,7 @@ function evalPlayer(id, ctx) {
   const sp = ctx.sleeper?.[id];
   const espnRaw = db.e != null ? ctx.espn?.[String(db.e)] : undefined;
   const own = db.e != null ? ctx.espnOwn?.[String(db.e)] : undefined;
-  const espnAdj = typeof espnRaw === 'number' ? espnRaw - (1 - (ctx.scoring.rec ?? 0)) * (sp?.rec || 0) : undefined;
+  const espnAdj = typeof espnRaw === 'number' ? espnRaw - (1 - (ctx.scoring.rec ?? 0)) * (sp?.rec || 0) + (sp?.bonus?.total || 0) : undefined;
   const vals = [];
   if (sp) vals.push(sp.pts);
   if (typeof espnAdj === 'number') vals.push(espnAdj);
@@ -590,7 +653,7 @@ function evalPlayer(id, ctx) {
     full, mean, sd, floor: Math.max(actual, mean - 1.28 * sd), ceil: mean + 1.28 * sd,
     actual, started, final: !!game && game.state === 'post', live: !!game && game.state === 'in', gameDetail: game?.detail || '',
     done: ctx.games ? (!game || game.state === 'post') : started,
-    s: sp?.pts, e: espnAdj, opp: sp?.opp || game?.opp, noProj: !vals.length,
+    s: sp?.pts, e: espnAdj, opp: sp?.opp || game?.opp, noProj: !vals.length, bonus: sp?.bonus || null,
     teamWin: game?.winP ?? null, slStart: ctx.starts?.[id]?.st, espnStart: own?.st,
     startPct: ctx.starts?.[id]?.st ?? own?.st,          // Sleeper's "% start" first, ESPN's as fallback
     snapRecent: ctx.snaps?.recent?.[id] || null, snapToday: ctx.snaps?.today?.[id] || null,
@@ -951,10 +1014,47 @@ function roleNote(p, idx) {
   return `${r.role} on ${p.team}. Teammate ${who} may miss this game${r.newRole ? `, moving ${p.name} up to ${r.newRole}` : ''}, so more snaps and touches are likely. Sleeper and ESPN projections usually already include this.`;
 }
 const snapShort = (p) => { const sh = snapShare(p); return sh == null || ['K', 'DEF'].includes(p.pos) ? null : `${sh}% snaps`; };
+// ---------------- player value (0–100) ----------------
+// Blends this week's combined projection (rank at position) with role/snaps, start %, source agreement and trend.
+const POOL = { QB: 24, RB: 48, WR: 60, TE: 24, K: 20, DEF: 20 };
+function posRanks(players, sleeper, espn) {
+  const by = {};
+  const ids = new Set([...Object.keys(sleeper || {}), ...Object.keys(players).filter((id) => players[id].e != null && espn?.[String(players[id].e)] != null)]);
+  for (const id of ids) {
+    const pos = players[id]?.p; if (!POOL[pos]) continue;
+    const vals = [sleeper?.[id]?.pts, players[id].e != null ? espn?.[String(players[id].e)] : undefined].filter((v) => typeof v === 'number');
+    if (vals.length) (by[pos] ||= []).push({ id, v: avg(vals) });
+  }
+  const rank = {};
+  for (const [pos, list] of Object.entries(by)) { list.sort((a, b) => b.v - a.v); list.forEach((x, i) => { rank[x.id] = { r: i + 1, pos }; }); }
+  return rank;
+}
+function playerValue(p, ranks) {
+  if (p.unavailable) return { v: 0, grade: '–', parts: ['Not expected to play'] };
+  const rk = ranks?.[p.id];
+  const pool = POOL[p.pos] || 30;
+  const parts = [], comp = [];
+  const add = (w, x, why) => { comp.push([w, Math.max(0, Math.min(100, x))]); parts.push(why); };
+  if (rk) add(0.55, 100 * (1 - (rk.r - 1) / (2 * pool)), `Projection ${ordinal(rk.r)} among ${p.pos}s`);
+  else if (p.mean > 0) add(0.55, 20, 'Projected, but outside the usual starter pool');
+  const sh = snapShare(p); if (sh != null && !['K', 'DEF'].includes(p.pos)) add(0.15, sh, `${sh}% of snaps`);
+  if (typeof p.startPct === 'number') add(0.15, p.startPct, `${Math.round(p.startPct)}% start`);
+  if (p.s != null && p.e != null) { const d = Math.abs(p.s - p.e); add(0.10, d < 1.5 ? 100 : d < 4 ? 65 : 35, d < 1.5 ? 'Sleeper and ESPN agree' : 'Sleeper and ESPN disagree'); }
+  if (p.adds || p.drops) add(0.05, 50 + Math.max(-50, Math.min(50, (p.adds - p.drops) / 100)), p.adds >= p.drops ? 'Being added on Sleeper' : 'Being dropped on Sleeper');
+  if (!comp.length) return null;
+  const W = comp.reduce((a, [w]) => a + w, 0);
+  const v = Math.round(comp.reduce((a, [w, x]) => a + w * x, 0) / W);
+  const grade = v >= 85 ? 'A' : v >= 72 ? 'B' : v >= 58 ? 'C' : v >= 42 ? 'D' : 'F';
+  return { v, grade, parts };
+}
+
 // Compact stat chips + labelled notes under each player (replaces the old stack of grey lines).
 function chipsFor(p, idx) {
   const c = [];
   const chip = (text, cls = '', title = null) => c.push(el('span', { class: 'sc ' + cls, text, title }));
+  const val = p.final ? null : playerValue(p, state.ranks);
+  if (val && !p.unavailable) chip(`Value ${val.v} · ${val.grade}`, 'val g' + val.grade, `Bench Boss value (0–100) for this week: ${val.parts.join(' · ')}`);
+  if (p.bonus?.total >= 0.1 && !p.started && !p.unavailable) chip(`Bonus +${f1(p.bonus.total)}`, 'good', 'Expected bonus points from your league settings, already included in the projections');
   if (!p.started && !p.unavailable) {
     if (p.s != null) chip(`Sleeper ${f1(p.s)}`);
     if (p.e != null) chip(`ESPN ${f1(p.e)}`);
@@ -976,6 +1076,8 @@ function notesFor(p, idx) {
   const r = roleInfo(p, idx);
   if (r?.missing.length && !p.unavailable && !p.final) note('Opportunity', `${r.missing.map((x) => `${x.n} (${x.st})`).join(', ')} may miss this game${r.newRole ? `, moving ${p.name} up to ${r.newRole}` : ''}. More snaps and touches likely.`, 'up');
   const sn = scriptNote(p); if (sn) note('Game', sn);
+  const bi = (p.bonus?.items || []).filter((b) => b.chance != null && b.chance >= 0.15).sort((a, b) => b.exp - a.exp).slice(0, 2);
+  if (bi.length && !p.started && !p.unavailable) note('Bonus', bi.map((b) => `${Math.round(b.chance * 100)}% chance of ${b.label} (+${b.w})`).join(' · '), 'up');
   const sh = snapShare(p); if (sh != null && sh < 40 && !['K', 'DEF'].includes(p.pos) && !p.unavailable) note('Snaps', `Only ${sh}% of snaps lately, so limited chances to score.`, 'down');
   return n;
 }
@@ -1276,6 +1378,7 @@ function render(d) {
   const scoring = league.scoring_settings || {};
   const base = { players, sleeper, espn, espnOwn, trend, starts, snaps: d.snaps, scoring, games };
   const tidx = teamIndex(players, d.snaps);
+  state.ranks = posRanks(players, sleeper, espn);
   const ctxMine = { ...base, pts: myM?.players_points || {} };
   const ctxOpp = { ...base, pts: oppM?.players_points || {} };
   const ev = (id, c) => (id && id !== '0' ? evalPlayer(id, c) : null);
@@ -1529,11 +1632,17 @@ function render(d) {
   benchCard.append(cols);
   view.append(benchCard);
   const lower = el('div', { class: 'card' });
+  const active = BONUS.filter((b) => typeof scoring[b.k] === 'number' && scoring[b.k]);
+  lower.append(fold('bonus', 'Bonus scoring', el('div', { class: 'how' },
+    el('p', { text: active.length ? `Your league pays these bonuses. Bench Boss estimates each player's chance of hitting them and adds the expected points to both Sleeper and ESPN projections:` : 'Your league has no yardage, first-down or long-TD bonuses, so projections are plain league scoring.' }),
+    active.length ? el('div', { class: 'chips' }, active.map((b) => el('span', { class: 'sc', text: `${b.label} ${scoring[b.k] > 0 ? '+' : ''}${scoring[b.k]}${b.per && !b.share ? ' each' : ''}` }))) : null,
+    el('p', { text: 'Other bonuses Sleeper and ESPN leagues commonly use: ' + COMMON_BONUSES.join(' · ') + '. You can check or change them in your league settings.' })), true));
   lower.append(fold('how', 'How this works', el('div', { class: 'how' },
     el('p', { text: "Projections come from Sleeper (recalculated with your league's scoring) and ESPN when available, averaged. When they disagree, the player is treated as riskier." }),
     el('p', { text: "Live: for a player whose game is under way, the estimate is their points so far plus the projection for the rest of the game. Finished games are locked in. Your win chance compares both teams' estimated finals, and refreshes about every 45 seconds." }),
     el('p', { text: 'Players whose games have started cannot be moved, so suggestions only involve players who have not played yet. Out/IR players are skipped, and Doubtful players are discounted. Estimates only; check injuries before kickoff.' }),
     el('p', { text: "Watch compares each refresh with the last one and logs injury status changes (yours and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. Injury statuses refresh about every 30 minutes. Alerts only work while this page is open in a tab; it keeps checking in the background when alerts are on." }),
+    el('p', { text: "Value (0–100) is this week's Bench Boss score: 55% projection rank at the position (Sleeper and ESPN combined), 15% snap share, 15% start %, 10% how closely Sleeper and ESPN agree, 5% add/drop trend. A 85+, B 72+, C 58+, D 42+." }),
     el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Snap share is the player's share of their team's offensive snaps over the last 3 games, from Sleeper's weekly stats; under 40% is flagged. Roles (WR1, WR2…) rank teammates at the same position by recent snap share, using Sleeper's depth chart where snaps are missing. When a teammate who plays a real role is out or doubtful, the player is flagged for more opportunity; this is a note, not a projection change, because Sleeper and ESPN already adjust for announced injuries. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
   view.append(lower);
   $('watchBtn').classList.toggle('hidden', onTrades());
