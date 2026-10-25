@@ -180,6 +180,21 @@
   }
 
   /* watch */
+  .fab { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5; display: inline-flex; align-items: center; gap: 8px;
+         border: 0; border-radius: 999px; padding: 12px 18px; font: inherit; font-weight: 600; cursor: pointer; background: var(--forest); color: #fff; box-shadow: 0 8px 24px -8px rgba(0,0,0,.4); }
+  @media (prefers-color-scheme: dark) { .fab { color: #07140d; } }
+  .fab .count { background: var(--bad); color: #fff; border-radius: 999px; min-width: 20px; padding: 1px 6px; font-size: 12px; text-align: center; }
+  dialog#watchDlg { border: 0; padding: 0; background: transparent; color: var(--ink); width: min(560px, calc(100vw - 24px)); max-height: 82vh; }
+  dialog#watchDlg::backdrop { background: rgba(10,18,14,.45); }
+  .dlg { background: var(--card); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow); display: flex; flex-direction: column; max-height: 82vh; }
+  .dlg-h { display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
+  .dlg-h h2 { font-family: var(--serif); font-weight: 600; font-size: 21px; margin: 0; margin-right: auto; }
+  .dlg-b { overflow-y: auto; padding: 14px 18px 18px; }
+  .x { border: 0; background: transparent; color: var(--muted); font-size: 26px; line-height: 1; cursor: pointer; padding: 0 4px; }
+  @media (max-width: 560px) {                       /* bottom sheet on phones */
+    dialog#watchDlg { width: 100vw; max-width: 100vw; margin: auto 0 0; }
+    .dlg { border-radius: 22px 22px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  }
   .pill { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
   .pill.on { background: var(--forest-soft); color: var(--forest); border-color: transparent; }
   .ev { display: flex; gap: 10px; padding: 8px 0 8px 10px; border-top: 1px solid var(--line); font-size: 14px; border-left: 3px solid transparent; }
@@ -228,6 +243,13 @@
 
   <nav id="tabs" class="tabs hidden" aria-label="Your leagues"></nav>
   <section id="leagueView" class="hidden"></section>
+  <button id="watchBtn" class="fab hidden" type="button" aria-haspopup="dialog">Watch <span id="watchCount" class="count hidden"></span></button>
+  <dialog id="watchDlg" aria-labelledby="watchTitle">
+    <div class="dlg">
+      <div class="dlg-h"><h2 id="watchTitle">Watch</h2><div id="watchTools"></div><button id="watchClose" class="x" type="button" aria-label="Close">×</button></div>
+      <div id="watchBody" class="dlg-b"></div>
+    </div>
+  </dialog>
 
   <p class="foot">Made for fun · Data from Sleeper and ESPN · Projections are estimates, not guarantees · Not affiliated with Sleeper, ESPN or the NFL</p>
 </main>
@@ -539,8 +561,16 @@ function enterApp() {
   renderTabs();
   openLeague(state.leagues[0].league_id);
 }
+$('watchBtn').addEventListener('click', () => {
+  store($('watchBtn').dataset.seen, Date.now());
+  $('watchCount').classList.add('hidden');
+  $('watchDlg').showModal();
+});
+$('watchClose').addEventListener('click', () => $('watchDlg').close());
+$('watchDlg').addEventListener('click', (e) => { if (e.target === $('watchDlg')) $('watchDlg').close(); });   // tap outside to close
 $('switchBtn').addEventListener('click', () => {
   stopPoll();
+  $('watchBtn').classList.add('hidden');
   $('connect').classList.remove('hidden');
   ['tabs', 'leagueView', 'userChip'].forEach((id) => $(id).classList.add('hidden'));
   $('username').focus();
@@ -899,11 +929,12 @@ function render(d) {
   }
   const events = isCurrentWeek() ? runWatch(`bb_watch_${league.league_id}_${week}`, { watched, swaps, wp: oppR ? rec.wp : null, blowouts }) : [];
 
-  const watchCard = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Watch' }),
-    canNotify() && isCurrentWeek() ? el('button', { type: 'button', class: 'pill' + (alertsOn() ? ' on' : ''), text: alertsOn() ? 'Alerts on' : 'Turn on alerts', onclick: toggleAlerts,
-      title: 'Browser alerts while this page is open (it keeps checking in a background tab)' }) : null));
+  // Watch lives in a pop-up (opened from the floating button) so the main page stays short.
+  const watchCard = el('div');
+  $('watchTools').replaceChildren(canNotify() && isCurrentWeek() ? el('button', { type: 'button', class: 'pill' + (alertsOn() ? ' on' : ''), text: alertsOn() ? 'Alerts on' : 'Turn on alerts', onclick: toggleAlerts,
+    title: 'Browser alerts while this page is open (it keeps checking in a background tab)' }) : '');
   const feed = events.slice(0, 6);
-  watchCard.append(el('div', { class: 'label', style: 'margin:4px 0 2px', text: 'Alerts' }),
+  watchCard.append(el('div', { class: 'label', style: 'margin:0 0 2px', text: 'Alerts' }),
     ...(feed.length ? feed.map((ev) => el('div', { class: 'ev ' + ev.cls },
       el('span', { class: 'evt', text: new Date(ev.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }), el('span', { text: ev.text })))
       : [el('div', { class: 'pm', style: 'padding:6px 0', text: isCurrentWeek()
@@ -939,7 +970,14 @@ function render(d) {
         notes.length ? el('div', { class: 'pm', text: notes.join(' ') }) : null));
     }
   }
-  view.append(watchCard);
+  $('watchBody').replaceChildren(watchCard);
+  const seenKey = `bb_seen_${league.league_id}_${week}`;
+  const unseen = events.filter((ev) => ev.t > (load(seenKey) || 0)).length;
+  if ($('watchDlg').open && unseen) store(seenKey, Date.now());      // already looking at it
+  const n = $('watchDlg').open ? 0 : unseen;
+  $('watchCount').textContent = n; $('watchCount').classList.toggle('hidden', !n);
+  $('watchBtn').dataset.seen = seenKey;
+  $('watchBtn').classList.remove('hidden');
 
   // ----- head to head: your recommended lineup next to theirs, slot by slot -----
   const nSwaps = rec.lineup.filter((p, i) => p && (!current[i] || current[i].id !== p.id)).length;

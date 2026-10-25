@@ -10,9 +10,9 @@ The whole app is a single `index.html`, with no build step.
 - **Gives each player a verdict and reason.** Every lineup and bench player gets a verdict (Start, Keep, Toss-up, Sit, Close, Bench or Out), along with a short reason for it.
 - **Shows exact live scores with projected finals.** Each player's live score appears in large type, with their projected final score underneath in smaller type.
 - **Puts both lineups side by side.** Your recommended lineup and your opponent's lineup sit next to each other, slot by slot, with live scores and projected finals.
-- **Watches your matchup.** A Watch card logs injury status changes (for your players and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. You can turn on browser alerts for these.
-- **Shows a crowd check.** Each player shows the "% start" figure from Sleeper (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add and drop counts. The Watch card flags bench players most managers start and starters few managers start.
-- **Shows the games that decide your matchup.** For each NFL game, the Watch card shows how many projected points you and your opponent have left in it, the betting favorite or live win chance, and when your players face your opponent's defense.
+- **Watches your matchup.** A floating Watch button opens a pop-up that logs injury status changes (for your players and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. The button shows how many new alerts you have, and you can turn on browser alerts for these.
+- **Shows a crowd check.** Each player shows the "% start" figure from Sleeper (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add and drop counts. The Watch pop-up flags bench players most managers start and starters few managers start.
+- **Shows the games that decide your matchup.** For each NFL game, the Watch pop-up shows how many projected points you and your opponent have left in it, the betting favorite or live win chance, and when your players face your opponent's defense.
 - **Shows a Predicted winner line.** This line names the team expected to win the matchup, and by how much, using the combined Sleeper and ESPN projections.
 
 ## How it works
