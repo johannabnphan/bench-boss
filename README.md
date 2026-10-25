@@ -9,6 +9,10 @@ The whole app is a single `index.html`, with no build step.
 - **Connects to Sleeper by username.** Bench Boss loads your leagues, your roster and this week's opponent.
 - **Gives each player a verdict and reason.** Every lineup and bench player gets a verdict (Start, Keep, Toss-up, Sit, Close, Bench or Out), along with a short reason for it.
 - **Shows exact live scores with projected finals.** Each player's live score appears in large type, with their projected final score underneath in smaller type.
+- **Puts both lineups side by side.** Your recommended lineup and your opponent's lineup sit next to each other, slot by slot, with live scores and projected finals.
+- **Watches your matchup.** A Watch card logs injury status changes (for your players and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. You can turn on browser alerts for these.
+- **Shows a crowd check.** Each player shows the "% start" figure from Sleeper (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add and drop counts. The Watch card flags bench players most managers start and starters few managers start.
+- **Shows the games that decide your matchup.** For each NFL game, the Watch card shows how many projected points you and your opponent have left in it, the betting favorite or live win chance, and when your players face your opponent's defense.
 - **Shows a Predicted winner line.** This line names the team expected to win the matchup, and by how much, using the combined Sleeper and ESPN projections.
 
 ## How it works
@@ -18,9 +22,11 @@ The whole app is a single `index.html`, with no build step.
 - **Live scoring:** during games, scores refresh about every 45 seconds. Points from games that have already started are locked in. ESPN's scoreboard supplies game progress, so a player's remaining projection shrinks as their game goes on.
 - **Injury and bye tags:** these come from Sleeper. The player list, which carries injury status, refreshes about every 30 minutes.
 - **Per-player suggestions:** each player's projection range (floor to ceiling) is compared with the alternatives, taking the opponent into account. When you're the underdog, the picks lean toward upside. When you're favored, they lean toward safer floors.
-- **Status chips:** chips show whether Sleeper projections, ESPN projections and live game status loaded. When a source fails, its chip's hover text explains why.
+- **Game notes:** before kickoff, ESPN's betting line gives each team's chance to win. During games, ESPN's live win probability is used. Teams that fall behind tend to pass more and run less, so trailing teams' passers and receivers get garbage-time upside and their running backs get downside.
+- **Watch and alerts:** each refresh is compared with the last one stored in your browser for that league and week. The first visit to a week only records a starting point. Alerts only work while the page is open in a tab; it keeps checking in a background tab when alerts are on. Some mobile browsers only allow alerts from installed apps.
+- **Status chips:** chips show whether Sleeper projections, ESPN projections, live game status and Sleeper start % loaded. When a source fails, its chip's hover text explains why.
 
-Note: Sleeper's projections endpoint is unofficial and may change.
+Note: Sleeper's projections and "% start" endpoints are unofficial and may change.
 
 ## Disclaimer
 

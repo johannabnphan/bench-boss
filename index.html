@@ -148,6 +148,49 @@
   .mini .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
   .mini .num small { display: block; font-weight: 400; color: var(--muted); font-size: 11.5px; }
 
+  /* head to head */
+  .hhead { display: grid; grid-template-columns: 1fr 50px 1fr; gap: 12px; padding: 4px 0 10px; font-size: 13px; }
+  .hhead b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hhead span { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .hhead .r { text-align: right; }
+  .hrow { display: grid; grid-template-columns: 1fr 50px 1fr; gap: 6px 12px; align-items: center; padding: 13px 0; border-top: 1px solid var(--line); }
+  .hrow.first { border-top: 0; }
+  .hrow.solo { grid-template-columns: 50px 1fr; }
+  .hrow.solo .slot { order: -1; }
+  .hrow.swap { background: linear-gradient(90deg, var(--gold-soft), transparent 60%); margin: 0 -22px; padding: 14px 22px; border-left: 3px solid var(--gold); }
+  .side { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-width: 0; }
+  .side.r { flex-direction: row-reverse; text-align: right; }
+  .side.r .pr { text-align: left; }
+  .side.r .pn { justify-content: flex-end; }
+  .who { min-width: 0; }
+  .hwhy { grid-column: 1 / 2; }
+  .hrow.solo .hwhy { grid-column: 2 / 3; }
+  @media (max-width: 640px) {
+    .hhead, .hrow { grid-template-columns: 1fr 40px 1fr; gap: 6px 8px; }
+    .hrow.solo { grid-template-columns: 40px 1fr; }
+    .side, .side.r { flex-direction: column; align-items: flex-start; gap: 4px; }
+    .side.r { align-items: flex-end; }
+    .side.r .pr { text-align: right; }
+    .side .pr { text-align: left; }
+    .side .pr .v { font-size: 18px; }
+    .side .pr .rg { white-space: normal; }
+    .hwhy, .hrow.solo .hwhy { grid-column: 1 / -1; }
+    .hrow.swap { margin: 0 -18px; padding: 14px 18px; }
+    .slot { font-size: 10px; }
+  }
+
+  /* watch */
+  .pill { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .pill.on { background: var(--forest-soft); color: var(--forest); border-color: transparent; }
+  .ev { display: flex; gap: 10px; padding: 8px 0 8px 10px; border-top: 1px solid var(--line); font-size: 14px; border-left: 3px solid transparent; }
+  .ev.bad { border-left-color: var(--bad); }
+  .ev.good { border-left-color: var(--forest-2); }
+  .ev.info { border-left-color: var(--gold); }
+  .evt { flex: none; color: var(--muted); font-size: 12px; min-width: 58px; padding-top: 1px; font-variant-numeric: tabular-nums; }
+  .game { padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .game .gh { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .game .gs { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-top: 4px; }
+
   .how { font-size: 13.5px; color: var(--muted); }
   .how p { margin: 8px 0 0; }
 
@@ -281,13 +324,37 @@ async function getEspnProj(season, week) {
   const r = await fetch(`${ESPN}/${season}/segments/0/leaguedefaults/3?view=kona_player_info`, { headers: { 'x-fantasy-filter': JSON.stringify(filter) } });
   if (!r.ok) throw new Error('ESPN returned ' + r.status);
   const data = await r.json();
-  const out = {};
+  const out = {}, own = {};
   for (const row of data.players || []) {
+    const id = String(row.player?.id);
     const st = (row.player?.stats || []).find((s) => s.scoringPeriodId === week && s.statSourceId === 1 && s.statSplitTypeId === 1);
-    if (st && typeof st.appliedTotal === 'number') out[String(row.player.id)] = st.appliedTotal;
+    if (st && typeof st.appliedTotal === 'number') out[id] = st.appliedTotal;
+    const o = row.player?.ownership;     // share of ESPN leagues starting / rostering this player
+    if (o && typeof o.percentStarted === 'number') own[id] = { st: o.percentStarted, ow: o.percentOwned };
   }
   if (!Object.keys(out).length) throw new Error('No ESPN projections found');
-  return out;
+  return { proj: out, own };
+}
+
+// The "% start" Sleeper shows on each player: share of Sleeper leagues starting / rostering them this week.
+// Unofficial endpoint (it's what the Sleeper app uses), so callers fall back to ESPN's rate if it fails.
+async function getSleeperStarts(season, week) {
+  let raw = null;
+  for (const host of ['https://api.sleeper.app', 'https://api.sleeper.com']) {
+    try { const r = await fetch(`${host}/players/nfl/research/regular/${season}/${week}`); if (r.ok) { raw = await r.json(); break; } } catch (e) { /* try the next host */ }
+  }
+  if (!raw || typeof raw !== 'object') throw new Error('Sleeper start % unavailable');
+  const rows = Object.entries(raw).filter(([, v]) => v && typeof v.started === 'number');
+  if (!rows.length) throw new Error('No Sleeper start % this week');
+  const scale = rows.every(([, v]) => v.started <= 1 && (v.owned ?? 0) <= 1) ? 100 : 1;   // accept 0–1 or 0–100
+  return Object.fromEntries(rows.map(([id, v]) => [id, { st: v.started * scale, ow: typeof v.owned === 'number' ? v.owned * scale : null }]));
+}
+
+// Sleeper's trending list: adds/drops across Sleeper leagues in the last 24h.
+async function getTrending() {
+  const [add, drop] = await Promise.all(['add', 'drop'].map((k) => get(`/players/nfl/trending/${k}?lookback_hours=24&limit=300`)));
+  const map = (arr) => Object.fromEntries((arr || []).map((x) => [x.player_id, x.count]));
+  return { add: map(add), drop: map(drop) };
 }
 
 // Live NFL game status (pre / in / post + how much of the game is done), keyed by Sleeper team abbreviation.
@@ -306,10 +373,25 @@ async function getGames(season, week) {
     let f = 0;
     if (gs === 'post') f = 1;
     else if (gs === 'in') f = Math.min(0.99, (Math.max(period, 1) <= 4 ? ((period - 1) * 900 + (900 - clock)) / 3600 : 0.98));
-    const detail = gs === 'post' ? 'Final' : gs === 'in' ? (st.type?.shortDetail || 'Live') : 'Upcoming';
-    for (const c of comp?.competitors || []) {
-      let ab = c.team?.abbreviation; ab = TEAM_FIX[ab] || ab;
-      if (ab) out[ab] = { state: gs, f, detail };
+    const detail = gs === 'post' ? 'Final' : gs === 'in' ? (st.type?.shortDetail || 'Live') : (st.type?.shortDetail || 'Upcoming');
+    const cs = (comp?.competitors || []).map((c) => ({ ab: TEAM_FIX[c.team?.abbreviation] || c.team?.abbreviation, home: c.homeAway === 'home', score: Number(c.score) || 0 }));
+    if (cs.length !== 2) continue;
+    // Pre-game spread, e.g. "BUF -6.5": expected margin for the favorite.
+    const m = /^([A-Z]{2,4})\s+(-?\d+(?:\.\d+)?)/.exec(comp?.odds?.[0]?.details || '');
+    const favAb = m ? (TEAM_FIX[m[1]] || m[1]) : null;
+    const edge = m ? Math.abs(parseFloat(m[2])) : 0;
+    const liveHome = comp?.situation?.lastPlay?.probability?.homeWinPercentage;
+    for (const [i, c] of cs.entries()) {
+      const o = cs[1 - i];
+      const pre = favAb ? (favAb === c.ab ? edge : -edge) : 0;
+      let winP = null;
+      if (gs === 'post') winP = c.score > o.score ? 1 : c.score < o.score ? 0 : 0.5;
+      else if (gs === 'in' && typeof liveHome === 'number') winP = c.home ? liveHome : 1 - liveHome;
+      else if (m || gs === 'in') {                                    // margin so far + pre-game edge for the time left
+        const r = 1 - f;
+        winP = Phi(((c.score - o.score) + pre * r) / (13.5 * Math.sqrt(Math.max(r, 0.02))));
+      }
+      if (c.ab) out[c.ab] = { state: gs, f, detail, opp: o.ab, home: c.home, score: c.score, oppScore: o.score, winP };
     }
   }
   if (!Object.keys(out).length) throw new Error('No games found');
@@ -336,6 +418,7 @@ function evalPlayer(id, ctx) {
   const pos = db.p;
   const sp = ctx.sleeper?.[id];
   const espnRaw = db.e != null ? ctx.espn?.[String(db.e)] : undefined;
+  const own = db.e != null ? ctx.espnOwn?.[String(db.e)] : undefined;
   const espnAdj = typeof espnRaw === 'number' ? espnRaw - (1 - (ctx.scoring.rec ?? 0)) * (sp?.rec || 0) : undefined;
   const vals = [];
   if (sp) vals.push(sp.pts);
@@ -369,7 +452,10 @@ function evalPlayer(id, ctx) {
     full, mean, sd, floor: Math.max(actual, mean - 1.28 * sd), ceil: mean + 1.28 * sd,
     actual, started, final: !!game && game.state === 'post', live: !!game && game.state === 'in', gameDetail: game?.detail || '',
     done: ctx.games ? (!game || game.state === 'post') : started,
-    s: sp?.pts, e: espnAdj, opp: sp?.opp, noProj: !vals.length };
+    s: sp?.pts, e: espnAdj, opp: sp?.opp || game?.opp, noProj: !vals.length,
+    teamWin: game?.winP ?? null, slStart: ctx.starts?.[id]?.st, espnStart: own?.st,
+    startPct: ctx.starts?.[id]?.st ?? own?.st,          // Sleeper's "% start" first, ESPN's as fallback
+    adds: ctx.trend?.add?.[id] || 0, drops: ctx.trend?.drop?.[id] || 0 };
 }
 
 const totals = (lineup) => lineup.reduce((a, p) => p ? { mu: a.mu + p.mean, v: a.v + p.sd * p.sd } : a, { mu: 0, v: 0 });
@@ -485,15 +571,20 @@ async function openLeague(leagueId, week) {
       get(`/league/${leagueId}/matchups/${state.week}`), getPlayers(),
     ]);
     const season = state.nfl.season;
-    const [sp, es, gm] = await Promise.allSettled([
+    const [sp, es, gm, tr, ss] = await Promise.allSettled([
       getSleeperProj(season, state.week, league.scoring_settings || {}),
       timeout(8000, getEspnProj(season, state.week)),
       timeout(8000, getGames(season, state.week)),
+      timeout(8000, getTrending()),
+      timeout(8000, getSleeperStarts(season, state.week)),
     ]);
     if (leagueId !== state.leagueId) return;
     state.data = { league, rosters, users, matchups, players,
-      sleeper: sp.status === 'fulfilled' ? sp.value : null, espn: es.status === 'fulfilled' ? es.value : null,
+      sleeper: sp.status === 'fulfilled' ? sp.value : null,
+      espn: es.status === 'fulfilled' ? es.value.proj : null, espnOwn: es.status === 'fulfilled' ? es.value.own : null,
       games: gm.status === 'fulfilled' ? gm.value : null,
+      trend: tr.status === 'fulfilled' ? tr.value : null,
+      starts: ss.status === 'fulfilled' ? ss.value : null,
       sleeperErr: sp.status === 'rejected' ? sp.reason.message : null,
       espnErr: es.status === 'rejected' ? es.reason.message : null, updated: new Date(), liveErr: false };
     render(state.data);
@@ -504,7 +595,7 @@ async function openLeague(leagueId, week) {
 async function tick(leagueId, manual) {
   const d = state.data;
   if (!d || leagueId !== state.leagueId) return;
-  if (document.hidden && !manual) return;
+  if (document.hidden && !manual && !alertsOn()) return;          // keep checking in the background only when alerts are on
   try {
     const [matchups, games] = await Promise.all([
       get(`/league/${leagueId}/matchups/${state.week}`),
@@ -512,13 +603,96 @@ async function tick(leagueId, manual) {
     ]);
     if (leagueId !== state.leagueId) return;
     Object.assign(d, { matchups, games, updated: new Date(), liveErr: false });
-    if (Date.now() - (state.playersAt || 0) > PLAYERS_TTL) {          // keep injury statuses fresh
+    if (Date.now() - (state.playersAt || 0) > PLAYERS_TTL) {          // keep injury statuses and trends fresh
       try { d.players = await getPlayers(true); } catch (e) { /* keep the old list */ }
+      try { d.trend = await getTrending(); } catch (e) { /* keep the old trends */ }
+      try { d.starts = await getSleeperStarts(state.nfl.season, state.week); } catch (e) { /* keep the old start % */ }
     }
   } catch (e) { d.liveErr = true; }
   render(d);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && state.data && isCurrentWeek()) tick(state.leagueId, true); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  state.unread = 0; document.title = 'Bench Boss';
+  if (state.data && isCurrentWeek()) tick(state.leagueId, true);
+});
+
+// ---------------- watch: injury changes, new starts, win-chance swings, blowouts ----------------
+const canNotify = () => 'Notification' in window;
+const alertsOn = () => canNotify() && Notification.permission === 'granted' && load('bb_alerts') === true;
+async function toggleAlerts() {
+  if (!canNotify()) return;
+  if (alertsOn()) store('bb_alerts', false);
+  else if ((await Notification.requestPermission()) === 'granted') store('bb_alerts', true);
+  if (state.data) render(state.data);
+}
+function notify(events) {
+  if (!events.length) return;
+  if (document.hidden) { state.unread = (state.unread || 0) + events.length; document.title = `(${state.unread}) Bench Boss`; }
+  if (!alertsOn()) return;
+  for (const ev of events.slice(0, 3)) {
+    try { new Notification('Bench Boss', { body: ev.text, tag: ev.key }); } catch (e) { /* some mobile browsers only allow notifications from installed apps */ }
+  }
+}
+const SEVERITY = (s) => (/^(out|ir|pup|sus|cov|inactive|bye)/i.test(s) ? 3 : /^doubtful/i.test(s) ? 2 : /^questionable/i.test(s) ? 1 : 0);
+const statusOf = (p) => (p.bye ? 'Bye' : p.status || (p.tag === 'INACTIVE' ? 'Inactive' : 'Healthy'));
+
+// Compare this refresh with the last one stored for the league/week and log what changed.
+// The first look at a week only records a baseline, so opening the app doesn't flood you with alerts.
+function runWatch(key, w) {
+  const prev = load(key);
+  const snap = { status: {}, swaps: w.swaps.map((s) => s.key), wpAlert: prev?.wpAlert ?? w.wp, flags: prev?.flags || [], events: prev?.events || [] };
+  const fresh = [];
+  const add = (k, cls, text) => fresh.push({ key: k, cls, text, t: Date.now() });
+  for (const { p, who } of w.watched) {
+    const now = statusOf(p); snap.status[p.id] = now;
+    const was = prev?.status?.[p.id];
+    if (!prev || !was || was === now) continue;
+    const worse = SEVERITY(now) > SEVERITY(was);
+    add('inj:' + p.id, worse ? (who === 'their starter' ? 'good' : 'bad') : (who === 'their starter' ? 'bad' : 'good'),
+      `${p.name} (${who}): ${was} → ${now}${p.body && now !== 'Healthy' ? ', ' + p.body : ''}.`);
+  }
+  if (prev) {
+    for (const s of w.swaps) if (!prev.swaps.includes(s.key)) add('swap:' + s.key, 'info', s.text);
+    if (w.wp != null && Math.abs(w.wp - snap.wpAlert) >= 0.1) {
+      add('wp:' + Math.round(w.wp * 100), w.wp > snap.wpAlert ? 'good' : 'bad', `Your win chance moved from ${pct(snap.wpAlert)} to ${pct(w.wp)}.`);
+      snap.wpAlert = w.wp;
+    }
+    for (const b of w.blowouts) if (!snap.flags.includes(b.key)) { snap.flags.push(b.key); add(b.key, 'info', b.text); }
+  } else {
+    snap.flags = w.blowouts.map((b) => b.key);
+  }
+  snap.events = [...fresh.reverse(), ...snap.events].slice(0, 30);
+  store(key, snap);
+  notify(fresh);
+  return snap.events;
+}
+
+// How the NFL game itself might shape a player's day.
+function scriptNote(p) {
+  if (p.teamWin == null || p.final || p.unavailable || !p.team) return '';
+  const w = p.teamWin, live = p.live, tp = pct(w);
+  if (w <= 0.3) {
+    if (p.pos === 'RB') return `${p.team} ${live ? 'is trailing' : 'is an underdog'} (${tp} to win): teams playing from behind run less, so fewer carries.`;
+    if (['QB', 'WR', 'TE'].includes(p.pos)) return `${p.team} ${live ? 'is trailing' : 'is an underdog'} (${tp} to win): catch-up passing can add garbage-time points.`;
+    if (p.pos === 'DEF') return `${p.team} ${live ? 'is trailing' : 'is an underdog'} (${tp} to win): a tougher day for the defense.`;
+  }
+  if (w >= 0.75) {
+    if (p.pos === 'RB') return `${p.team} ${live ? 'is ahead' : 'is a big favorite'} (${tp} to win): late carries to run out the clock help.`;
+    if (['QB', 'WR', 'TE'].includes(p.pos)) return `${p.team} ${live ? 'is ahead' : 'is a big favorite'} (${tp} to win): a big lead can mean less passing late.`;
+    if (p.pos === 'DEF') return `${p.team} ${live ? 'is ahead' : 'is a big favorite'} (${tp} to win): opponents forced to throw give sack and turnover chances.`;
+  }
+  return '';
+}
+const kfmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
+function crowdNote(p) {
+  const parts = [];
+  if (typeof p.slStart === 'number') parts.push(`${Math.round(p.slStart)}% start on Sleeper`);
+  if (typeof p.espnStart === 'number') parts.push(`${Math.round(p.espnStart)}% on ESPN`);
+  if (p.adds) parts.push(`${kfmt(p.adds)} Sleeper adds in 24h`);
+  if (p.drops) parts.push(`${kfmt(p.drops)} Sleeper drops in 24h`);
+  return parts.join(' · ');
+}
 
 // ---------------- rendering ----------------
 const teamName = (r, users) => { const u = users.find((x) => x.user_id === r.owner_id); return (u && (u.metadata?.team_name || u.display_name)) || `Team ${r.roster_id}`; };
@@ -595,7 +769,7 @@ function fold(key, label, kids, first) {
 }
 
 function render(d) {
-  const { league, rosters, users, matchups, players, sleeper, espn, sleeperErr, espnErr, games } = d;
+  const { league, rosters, users, matchups, players, sleeper, espn, espnOwn, trend, starts, sleeperErr, espnErr, games } = d;
   const view = $('leagueView'); view.replaceChildren();
   const week = state.week;
   const mine = rosters.find((r) => r.owner_id === state.user.user_id);
@@ -605,7 +779,7 @@ function render(d) {
   const oppR = oppM && rosters.find((r) => r.roster_id === oppM.roster_id);
   const slots = league.roster_positions.filter((p) => !['BN', 'IR', 'TAXI'].includes(p));
   const scoring = league.scoring_settings || {};
-  const base = { players, sleeper, espn, scoring, games };
+  const base = { players, sleeper, espn, espnOwn, trend, starts, scoring, games };
   const ctxMine = { ...base, pts: myM?.players_points || {} };
   const ctxOpp = { ...base, pts: oppM?.players_points || {} };
   const ev = (id, c) => (id && id !== '0' ? evalPlayer(id, c) : null);
@@ -619,6 +793,8 @@ function render(d) {
     el('span', { class: 'src' + (espn ? ' ok' : ''), text: espn ? 'ESPN projections' : 'ESPN unavailable',
       title: espn ? null : `ESPN data could not be loaded${espnErr ? ' (' + espnErr + ')' : ''}. This is usually the browser blocking ESPN's unofficial API.` }),
     el('span', { class: 'src' + (games ? ' ok' : ''), text: games ? 'Live game status' : 'Game status unavailable' }),
+    el('span', { class: 'src' + (starts ? ' ok' : ''), text: starts ? 'Sleeper start %' : 'Sleeper start % unavailable',
+      title: starts ? null : (espnOwn ? "Sleeper's start % couldn't be loaded, so ESPN's is used instead." : 'No start % available from Sleeper or ESPN.') }),
     el('span', { class: 'src', text: scoringLabel(scoring) }));
 
   if (!sleeper && !espn) {
@@ -696,27 +872,112 @@ function render(d) {
   if (!games && isCurrentWeek()) summary.append(el('div', { class: 'insight warn', style: 'margin-top:10px', text: 'Live game status is unavailable, so players who have scored are treated as finished.' }));
   view.append(summary);
 
-  // ----- recommended lineup -----
+  // ----- watch -----
+  const swaps = [];
+  slots.forEach((s, i) => {
+    const p = rec.lineup[i], c = current[i];
+    if (p && !p.started && (!c || c.id !== p.id)) swaps.push({ key: `${p.id}>${c ? c.id : 'empty'}`,
+      text: c ? `${p.name} is now worth starting over ${c.name}: ${explain(p, c, { wp: wpNow })}.` : `Start ${p.name} in your empty ${SLOT_LABEL[s] || s} slot.` });
+  });
+  const myStart = rec.lineup.filter(Boolean), oppStart = (oppLineup || []).filter(Boolean);
+  const curIds = new Set(current.filter(Boolean).map((p) => p.id));
+  const watched = [...pool.map((p) => ({ p, who: curIds.has(p.id) ? 'your starter' : 'your bench' })), ...oppStart.map((p) => ({ p, who: 'their starter' }))];
+  // NFL games your matchup runs through: who has points left in each, plus live blowouts.
+  const gameMap = {};
+  for (const [side, list] of [['me', myStart], ['them', oppStart]]) for (const p of list) {
+    if (!p.team || !games?.[p.team] || p.done) continue;
+    const g = games[p.team]; const k = [p.team, g.opp].sort().join('-');
+    const e = gameMap[k] || (gameMap[k] = { k, a: p.team, b: g.opp, g, me: [], them: [] });
+    e[side].push(p);
+  }
+  const blowouts = [];
+  for (const e of Object.values(gameMap)) {
+    if (e.g.state !== 'in' || e.g.winP == null || (e.g.winP > 0.15 && e.g.winP < 0.85)) continue;
+    const loser = e.g.winP <= 0.15 ? e.a : e.b; const lp = e.g.winP <= 0.15 ? e.g.winP : 1 - e.g.winP;
+    const names = [...e.me.map((p) => 'your ' + p.name), ...e.them.map((p) => 'their ' + p.name)].join(', ');
+    blowouts.push({ key: 'blow:' + loser, text: `${loser} is down big (${pct(lp)} to win). Garbage time can help passers and receivers and hurt RBs: ${names}.` });
+  }
+  const events = isCurrentWeek() ? runWatch(`bb_watch_${league.league_id}_${week}`, { watched, swaps, wp: oppR ? rec.wp : null, blowouts }) : [];
+
+  const watchCard = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: 'Watch' }),
+    canNotify() && isCurrentWeek() ? el('button', { type: 'button', class: 'pill' + (alertsOn() ? ' on' : ''), text: alertsOn() ? 'Alerts on' : 'Turn on alerts', onclick: toggleAlerts,
+      title: 'Browser alerts while this page is open (it keeps checking in a background tab)' }) : null));
+  const feed = events.slice(0, 6);
+  watchCard.append(el('div', { class: 'label', style: 'margin:4px 0 2px', text: 'Alerts' }),
+    ...(feed.length ? feed.map((ev) => el('div', { class: 'ev ' + ev.cls },
+      el('span', { class: 'evt', text: new Date(ev.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }), el('span', { text: ev.text })))
+      : [el('div', { class: 'pm', style: 'padding:6px 0', text: isCurrentWeek()
+        ? 'Nothing new yet. Injury changes, newly startable players, big win-chance swings and blowouts show up here. Bench Boss checks about every 45 seconds while this page is open.'
+        : 'Alerts run for the current week only.' })]));
+  // Crowd check: start % (Sleeper, else ESPN) and Sleeper trends vs. your choices.
+  const crowd = [];
+  const where = (p) => (typeof p.slStart === 'number' ? 'Sleeper' : 'ESPN');
+  for (const p of benchPool) if (!p.unavailable && !p.started && p.startPct >= 60) crowd.push(`${p.name} has ${Math.round(p.startPct)}% start on ${where(p)} but is on your bench.`);
+  for (const p of myStart) if (!p.started && typeof p.startPct === 'number' && p.startPct <= 25) crowd.push(`Only ${Math.round(p.startPct)}% of ${where(p)} managers start ${p.name}.`);
+  for (const p of myStart) if (!p.started && p.drops >= 500) crowd.push(`${p.name} is among Sleeper's most-dropped players today (${kfmt(p.drops)} drops).`);
+  for (const p of benchPool) if (!p.started && p.adds >= 500) crowd.push(`${p.name} is among Sleeper's most-added players today (${kfmt(p.adds)} adds).`);
+  if (crowd.length) watchCard.append(el('div', { class: 'label', style: 'margin:14px 0 2px', text: 'Crowd check' }), ...crowd.slice(0, 5).map((t) => el('div', { class: 'ev', text: t })));
+  const gamesAtStake = Object.values(gameMap).map((e) => ({ ...e, mine: e.me.reduce((a, p) => a + p.mean - p.actual, 0), theirs: e.them.reduce((a, p) => a + p.mean - p.actual, 0) }))
+    .sort((x, y) => (y.mine + y.theirs) - (x.mine + x.theirs)).slice(0, 6);
+  if (gamesAtStake.length) {
+    watchCard.append(el('div', { class: 'label', style: 'margin:14px 0 2px', text: 'Games that decide your matchup' }));
+    for (const e of gamesAtStake) {
+      const notes = [];
+      const oppDef = e.them.find((p) => p.pos === 'DEF'), myDef = e.me.find((p) => p.pos === 'DEF');
+      const vsTheirDef = oppDef ? e.me.filter((p) => p.pos !== 'DEF' && p.team !== oppDef.team) : [];
+      const vsMyDef = myDef ? e.them.filter((p) => p.pos !== 'DEF' && p.team !== myDef.team) : [];
+      if (vsTheirDef.length) notes.push(`Their ${oppDef.name} faces your ${vsTheirDef.map((p) => p.name).join(', ')}.`);
+      if (vsMyDef.length) notes.push(`Your ${myDef.name} faces their ${vsMyDef.map((p) => p.name).join(', ')}.`);
+      if (e.me.length && e.them.length) notes.push('Both teams have players here, so it partly cancels out.');
+      const g = e.g, fav = g.winP == null ? '' : `${g.winP >= 0.5 ? e.a : e.b} ${pct(Math.max(g.winP, 1 - g.winP))} to win`;
+      const score = g.state === 'in' ? ` · ${e.a} ${g.score}–${g.oppScore} ${e.b}` : '';
+      watchCard.append(el('div', { class: 'game' },
+        el('div', { class: 'gh' }, el('b', { text: `${e.a} vs ${e.b}` }), el('span', { class: 'pm', text: [g.detail + score, fav].filter(Boolean).join(' · ') })),
+        el('div', { class: 'gs' },
+          el('span', {}, 'You ', el('b', { text: f1(e.mine) }), ' left', e.me.length ? ` (${e.me.map((p) => p.name).join(', ')})` : ''),
+          el('span', {}, 'Them ', el('b', { text: f1(e.theirs) }), ' left', e.them.length ? ` (${e.them.map((p) => p.name).join(', ')})` : '')),
+        notes.length ? el('div', { class: 'pm', text: notes.join(' ') }) : null));
+    }
+  }
+  view.append(watchCard);
+
+  // ----- head to head: your recommended lineup next to theirs, slot by slot -----
   const nSwaps = rec.lineup.filter((p, i) => p && (!current[i] || current[i].id !== p.id)).length;
   const card = el('div', { class: 'card' }, el('div', { class: 'card-h' },
-    el('h2', { text: allDone ? 'Your lineup' : 'Recommended lineup' }),
+    el('h2', { text: allDone ? 'Lineups' : 'Recommended lineup' }),
     el('span', { class: 'label', text: allDone ? 'Final' : nSwaps ? `${nSwaps} change${nSwaps > 1 ? 's' : ''}` : 'No changes' })));
+  const solo = !oppLineup;
+  if (!solo) card.append(el('div', { class: 'hhead' },
+    el('div', {}, el('b', { text: teamName(mine, users) }), el('span', { text: `${f2(myM?.points ?? 0)} · proj. ${f1(rec.t.mu)}` })),
+    el('span'),
+    el('div', { class: 'r' }, el('b', { text: teamName(oppR, users) }), el('span', { text: `${f2(oppM?.points ?? 0)} · proj. ${f1(oppT.mu)}` }))));
+  const metaOf = (p) => [p.pos, p.team || 'FA', p.opp ? 'vs ' + p.opp : null, p.tag && p.body && !p.bye ? p.body : null, p.started ? p.gameDetail : null].filter(Boolean).join(' · ');
   slots.forEach((s, i) => {
-    const p = rec.lineup[i]; const cur = current[i];
-    const first = i === 0 ? ' first' : '';
-    if (!p) { card.append(el('div', { class: 'row' + first }, el('span', { class: 'slot', text: SLOT_LABEL[s] || s }), el('div', { class: 'pm', text: 'No eligible player available' }), el('span'))); return; }
-    const swap = !p.started && (!cur || cur.id !== p.id);
-    const sg = suggestStarter(p, cur, swap, bestAlt(s), wpNow);
-    const nm = el('div', { class: 'pn' }, p.name,
-      el('span', { class: 'badge ' + sg.cls, text: sg.label }),
-      p.final ? null : statusBadge(p));
-    const meta = [p.pos, p.team || 'FA', p.opp ? 'vs ' + p.opp : null, p.tag && p.body && !p.bye ? p.body : null, p.started ? p.gameDetail : null].filter(Boolean).join(' · ');
-    const src = !p.started ? [p.s != null ? `Sleeper ${f1(p.s)}` : null, p.e != null ? `ESPN ${f1(p.e)}` : null].filter(Boolean).join(' · ') : '';
-    const left = el('div', {}, nm, el('div', { class: 'pm', text: meta + (src ? ' · ' + src : '') }));
-    left.append(el('div', { class: 'why' }, swap && cur ? el('s', { text: `Instead of ${cur.name}. ` }) : null, sg.text));
-    if (!p.started) { const cf = srcNote(p, !!espn); if (cf) left.append(el('div', { class: 'pm', text: cf })); }
-    const right = scoreCell(p);
-    card.append(el('div', { class: 'row' + (swap ? ' swap' : '') + first }, el('span', { class: 'slot', text: SLOT_LABEL[s] || s }), left, right));
+    const p = rec.lineup[i]; const cur = current[i]; const o = solo ? null : oppLineup[i];
+    const swap = !!p && !p.started && (!cur || cur.id !== p.id);
+    const row = el('div', { class: 'hrow' + (solo ? ' solo' : '') + (swap ? ' swap' : '') + (i === 0 ? ' first' : '') });
+    let why = null;
+    if (!p) row.append(el('div', { class: 'side' }, el('div', { class: 'pm', text: 'No eligible player available' })));
+    else {
+      const sg = suggestStarter(p, cur, swap, bestAlt(s), wpNow);
+      const src = !p.started ? [p.s != null ? `Sleeper ${f1(p.s)}` : null, p.e != null ? `ESPN ${f1(p.e)}` : null].filter(Boolean).join(' · ') : '';
+      row.append(el('div', { class: 'side' },
+        el('div', { class: 'who' },
+          el('div', { class: 'pn' }, el('span', { class: 'nmx', text: p.name }), el('span', { class: 'badge ' + sg.cls, text: sg.label }), p.final ? null : statusBadge(p)),
+          el('div', { class: 'pm', text: metaOf(p) + (src ? ' · ' + src : '') })),
+        scoreCell(p)));
+      why = el('div', { class: 'hwhy' }, el('div', { class: 'why' }, swap && cur ? el('s', { text: `Instead of ${cur.name}. ` }) : null, sg.text));
+      if (!p.started) [srcNote(p, !!espn), crowdNote(p)].forEach((t) => t && why.append(el('div', { class: 'pm', text: t })));
+      const sn = scriptNote(p); if (sn) why.append(el('div', { class: 'pm', text: sn }));
+    }
+    row.append(el('span', { class: 'slot', text: SLOT_LABEL[s] || s }));
+    if (!solo) row.append(o
+      ? el('div', { class: 'side r' },
+          el('div', { class: 'who' }, el('div', { class: 'pn' }, el('span', { class: 'nmx', text: o.name }), o.final ? null : statusBadge(o)), el('div', { class: 'pm', text: metaOf(o) })),
+          scoreCell(o))
+      : el('div', { class: 'side r' }, el('div', { class: 'pm', text: 'Empty' })));
+    if (why) row.append(why);
+    card.append(row);
   });
   view.append(card);
 
@@ -729,31 +990,21 @@ function render(d) {
     const meta = [p.pos, p.team || 'FA', p.opp ? 'vs ' + p.opp : null, p.tag && p.body && !p.bye ? p.body : null, p.started ? p.gameDetail : null].filter(Boolean).join(' · ');
     const src = !p.started ? [p.s != null ? `Sleeper ${f1(p.s)}` : null, p.e != null ? `ESPN ${f1(p.e)}` : null].filter(Boolean).join(' · ') : '';
     const left = el('div', {},
-      el('div', { class: 'pn' }, p.name, el('span', { class: 'badge ' + sg.cls, text: sg.label }), p.final ? null : statusBadge(p)),
+      el('div', { class: 'pn' }, p.name, el('span', { class: 'badge ' + sg.cls, text: sg.label }), p.final || ['out', 'bye'].includes(sg.cls) ? null : statusBadge(p)),
       el('div', { class: 'pm', text: meta + (src ? ' · ' + src : '') }),
       el('div', { class: 'why' }, sg.text));
-    if (!p.started && !p.unavailable) { const cf = srcNote(p, !!espn); if (cf) left.append(el('div', { class: 'pm', text: cf })); }
+    if (!p.started && !p.unavailable) [srcNote(p, !!espn), crowdNote(p), scriptNote(p)].forEach((t) => t && left.append(el('div', { class: 'pm', text: t })));
     const right = scoreCell(p);
     benchCard.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') }, el('span', { class: 'slot', text: p.pos || '-' }), left, right));
   });
   view.append(benchCard);
   const lower = el('div', { class: 'card' });
-  if (oppLineup) {
-    const oppCard = el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h2', { text: `${teamName(oppR, users)}` }), el('span', { class: 'label', text: 'Their lineup' })));
-    oppLineup.forEach((p, i) => {
-      if (!p) return;
-      const meta = [p.pos, p.team || 'FA', p.opp ? 'vs ' + p.opp : null, p.tag && p.body && !p.bye ? p.body : null, p.started ? p.gameDetail : null].filter(Boolean).join(' · ');
-      oppCard.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') },
-        el('span', { class: 'slot', text: SLOT_LABEL[slots[i]] || slots[i] }),
-        el('div', {}, el('div', { class: 'pn' }, p.name, p.final ? null : statusBadge(p)), el('div', { class: 'pm', text: meta })),
-        scoreCell(p)));
-    });
-    view.append(oppCard);
-  }
   lower.append(fold('how', 'How this works', el('div', { class: 'how' },
     el('p', { text: "Projections come from Sleeper (recalculated with your league's scoring) and ESPN when available, averaged. When they disagree, the player is treated as riskier." }),
     el('p', { text: "Live: for a player whose game is under way, the estimate is their points so far plus the projection for the rest of the game. Finished games are locked in. Your win chance compares both teams' estimated finals, and refreshes about every 45 seconds." }),
-    el('p', { text: 'Players whose games have started cannot be moved, so suggestions only involve players who have not played yet. Out/IR players are skipped, and Doubtful players are discounted. Estimates only; check injuries before kickoff.' }))));
+    el('p', { text: 'Players whose games have started cannot be moved, so suggestions only involve players who have not played yet. Out/IR players are skipped, and Doubtful players are discounted. Estimates only; check injuries before kickoff.' }),
+    el('p', { text: "Watch compares each refresh with the last one and logs injury status changes (yours and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. Injury statuses refresh about every 30 minutes. Alerts only work while this page is open in a tab; it keeps checking in the background when alerts are on." }),
+    el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
   view.append(lower);
 }
 
