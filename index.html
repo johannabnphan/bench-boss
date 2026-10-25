@@ -516,7 +516,40 @@ function recommend(slots, pool, current, opp) {
   const keep = best.score < curScore + (opp ? 0.003 : 0.3);
   return keep
     ? { lineup: current, t: curT, wp: curWp, cur: { t: curT, wp: curWp }, changed: false }
-    : { lineup: best.lineup, t: best.t, wp: best.wp, cur: { t: curT, wp: curWp }, changed: true };
+    : { lineup: alignToCurrent(slots, best.lineup, current), t: best.t, wp: best.wp, cur: { t: curT, wp: curWp }, changed: true };
+}
+
+// The optimizer picks WHO starts; this decides WHERE. Players who already start keep their current slot when
+// eligible, so a slot reshuffle never shows up as two conflicting swaps. Falls back to the optimizer's order.
+function alignToCurrent(slots, lineup, current) {
+  const out = slots.map(() => null);
+  const left = new Set(lineup.filter(Boolean));
+  slots.forEach((s, i) => {
+    const c = current[i];
+    const keep = c && [...left].find((p) => p.id === c.id);
+    if (keep && (!ELIG[s] || ELIG[s].includes(keep.pos) || keep.started)) { out[i] = keep; left.delete(keep); }
+  });
+  const open = slots.map((s, i) => i).filter((i) => !out[i]).sort((a, b) => (ELIG[slots[a]]?.length || 9) - (ELIG[slots[b]]?.length || 9));
+  for (const i of open) {
+    const p = [...left].find((q) => ELIG[slots[i]]?.includes(q.pos));
+    if (p) { out[i] = p; left.delete(p); }
+  }
+  return left.size ? lineup : out;
+}
+
+// Who actually enters and leaves the lineup (ignoring slot moves), paired same-position first.
+function lineupChanges(rec, current) {
+  const curIds = new Set(current.filter(Boolean).map((p) => p.id));
+  const recIds = new Set(rec.filter(Boolean).map((p) => p.id));
+  const ins = rec.filter((p) => p && !p.started && !curIds.has(p.id));
+  const outs = current.filter((p) => p && !p.started && !recIds.has(p.id));
+  const pairs = [];
+  for (const p of ins) {
+    const o = outs.find((x) => x.pos === p.pos) || outs[0] || null;
+    if (o) outs.splice(outs.indexOf(o), 1);
+    pairs.push({ in: p, out: o });
+  }
+  return pairs;
 }
 
 function explain(inp, out, ctx) {
@@ -790,7 +823,7 @@ function suggestBench(b, c) {
   const gap = target.mean - b.mean;
   if (gap <= 1.5) {
     const why = b.ceil > target.ceil + 1 ? 'more upside' : b.floor > target.floor + 1 ? 'a safer floor' : 'a similar outlook';
-    return { label: 'Close', cls: 'toss', text: `Only ${f1(Math.max(0, gap))} behind ${target.name}. A fine swap if you want ${why}.` };
+    return { label: 'Close', cls: 'toss', text: `Just ${f1(Math.max(0, gap))} behind ${target.name}, who still starts on the combined numbers. Next in line if you want ${why}.` };
   }
   return { label: 'Bench', cls: 'bench', text: `${f1(gap)} below ${target.name} (${f1(b.mean)} vs ${f1(target.mean)}), so no reason to start.` };
 }
@@ -847,8 +880,9 @@ function render(d) {
   const wpNow = rec.cur.wp;
   const recIds = new Set(rec.lineup.filter(Boolean).map((p) => p.id));
   const benchPool = pool.filter((p) => !recIds.has(p.id));
-  const displaced = {};                       // current starter id -> the player replacing them
-  slots.forEach((s, i) => { const p = rec.lineup[i], c = current[i]; if (p && c && !p.started && c.id !== p.id) displaced[c.id] = p; });
+  const changes = lineupChanges(rec.lineup, current);
+  const displaced = {}, replaces = {};        // current starter id -> who replaces them, and the reverse
+  for (const c of changes) if (c.out) { displaced[c.out.id] = c.in; replaces[c.in.id] = c.out; }
   const bestAlt = (slot) => benchPool.filter((b) => !b.unavailable && !b.started && b.mean > 0 && ELIG[slot] && ELIG[slot].includes(b.pos)).sort((a, b) => b.mean - a.mean)[0] || null;
   const allStarters = [...rec.lineup, ...(oppLineup || [])].filter(Boolean);
   const anyLive = allStarters.some((p) => p.live);
@@ -907,12 +941,8 @@ function render(d) {
   view.append(summary);
 
   // ----- watch -----
-  const swaps = [];
-  slots.forEach((s, i) => {
-    const p = rec.lineup[i], c = current[i];
-    if (p && !p.started && (!c || c.id !== p.id)) swaps.push({ key: `${p.id}>${c ? c.id : 'empty'}`,
-      text: c ? `${p.name} is now worth starting over ${c.name}: ${explain(p, c, { wp: wpNow })}.` : `Start ${p.name} in your empty ${SLOT_LABEL[s] || s} slot.` });
-  });
+  const swaps = changes.map(({ in: p, out: c }) => ({ key: `${p.id}>${c ? c.id : 'empty'}`,
+    text: c ? `${p.name} is now worth starting over ${c.name}: ${explain(p, c, { wp: wpNow })}.` : `Start ${p.name} in an empty lineup spot.` }));
   const myStart = rec.lineup.filter(Boolean), oppStart = (oppLineup || []).filter(Boolean);
   const curIds = new Set(current.filter(Boolean).map((p) => p.id));
   const watched = [...pool.map((p) => ({ p, who: curIds.has(p.id) ? 'your starter' : 'your bench' })), ...oppStart.map((p) => ({ p, who: 'their starter' }))];
@@ -984,7 +1014,7 @@ function render(d) {
   $('watchBtn').classList.remove('hidden');
 
   // ----- head to head: your recommended lineup next to theirs, slot by slot -----
-  const nSwaps = rec.lineup.filter((p, i) => p && (!current[i] || current[i].id !== p.id)).length;
+  const nSwaps = changes.length;
   const card = el('div', { class: 'card' }, el('div', { class: 'card-h' },
     el('h2', { text: allDone ? 'Lineups' : 'Recommended lineup' }),
     el('span', { class: 'label', text: allDone ? 'Final' : nSwaps ? `${nSwaps} change${nSwaps > 1 ? 's' : ''}` : 'No changes' })));
@@ -993,22 +1023,25 @@ function render(d) {
     el('div', {}, el('b', { text: teamName(mine, users) }), el('span', { text: `${f2(myM?.points ?? 0)} · proj. ${f1(rec.t.mu)}` })),
     el('span'),
     el('div', { class: 'r' }, el('b', { text: teamName(oppR, users) }), el('span', { text: `${f2(oppM?.points ?? 0)} · proj. ${f1(oppT.mu)}` }))));
+  const curIdsAll = new Set(current.filter(Boolean).map((p) => p.id));
   const metaOf = (p) => [p.pos, p.team || 'FA', p.opp ? 'vs ' + p.opp : null, p.tag && p.body && !p.bye ? p.body : null, p.started ? p.gameDetail : null].filter(Boolean).join(' · ');
   slots.forEach((s, i) => {
     const p = rec.lineup[i]; const cur = current[i]; const o = solo ? null : oppLineup[i];
-    const swap = !!p && !p.started && (!cur || cur.id !== p.id);
+    const swap = !!p && !p.started && !curIdsAll.has(p.id);             // newly in the lineup (not just a slot move)
+    const moved = !!p && !swap && !p.started && (!cur || cur.id !== p.id);
     const row = el('div', { class: 'hrow' + (solo ? ' solo' : '') + (swap ? ' swap' : '') + (i === 0 ? ' first' : '') });
     let why = null;
     if (!p) row.append(el('div', { class: 'side' }, el('div', { class: 'pm', text: 'No eligible player available' })));
     else {
-      const sg = suggestStarter(p, cur, swap, bestAlt(s), wpNow);
+      const sg = suggestStarter(p, replaces[p.id] || null, swap, bestAlt(s), wpNow);
       const src = !p.started ? [p.s != null ? `Sleeper ${f1(p.s)}` : null, p.e != null ? `ESPN ${f1(p.e)}` : null].filter(Boolean).join(' · ') : '';
       row.append(el('div', { class: 'side' },
         el('div', { class: 'who' },
           el('div', { class: 'pn' }, el('span', { class: 'nmx', text: p.name }), el('span', { class: 'badge ' + sg.cls, text: sg.label }), p.final ? null : statusBadge(p)),
           el('div', { class: 'pm', text: metaOf(p) + (src ? ' · ' + src : '') })),
         scoreCell(p)));
-      why = el('div', { class: 'hwhy' }, el('div', { class: 'why' }, swap && cur ? el('s', { text: `Instead of ${cur.name}. ` }) : null, sg.text));
+      why = el('div', { class: 'hwhy' }, el('div', { class: 'why' }, swap && replaces[p.id] ? el('s', { text: `Instead of ${replaces[p.id].name}. ` }) : null,
+        moved ? `Moves to ${SLOT_LABEL[s] || s} to make room. ` : null, sg.text));
       if (!p.started) [srcNote(p, !!espn), crowdNote(p)].forEach((t) => t && why.append(el('div', { class: 'pm', text: t })));
       const sn = scriptNote(p); if (sn) why.append(el('div', { class: 'pm', text: sn }));
     }
