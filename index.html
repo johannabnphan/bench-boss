@@ -210,6 +210,7 @@
   .game .gh { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
   .game .gs { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-top: 4px; }
 
+  .lowsnap { color: var(--clay); }
   .how { font-size: 13.5px; color: var(--muted); }
   .how p { margin: 8px 0 0; }
 
@@ -376,6 +377,31 @@ async function getSleeperStarts(season, week) {
   return Object.fromEntries(rows.map(([id, v]) => [id, { st: v.started * scale, ow: typeof v.owned === 'number' ? v.owned * scale : null }]));
 }
 
+// Snap counts from Sleeper's weekly stats (unofficial): off_snp = player's offensive snaps, tm_off_snp = team's.
+// Recent share comes from the last 3 weeks; the current week gives live snaps while games are on.
+const STATS = 'https://api.sleeper.com/stats/nfl';
+async function getWeekSnaps(season, week) {
+  const qs = ['QB', 'RB', 'WR', 'TE'].map((p) => `position[]=${p}`).join('&');
+  const r = await fetch(`${STATS}/${season}/${week}?season_type=regular&${qs}`);
+  if (!r.ok) throw new Error('Sleeper stats returned ' + r.status);
+  const out = {};
+  for (const row of await r.json()) {
+    const st = row?.stats; if (!row?.player_id || !st) continue;
+    if (typeof st.off_snp === 'number' && st.tm_off_snp > 0) out[row.player_id] = { snp: st.off_snp, tm: st.tm_off_snp };
+  }
+  return out;
+}
+async function getSnaps(season, week) {
+  const weeks = [week - 3, week - 2, week - 1].filter((w) => w >= 1);
+  const res = await Promise.allSettled(weeks.map((w) => getWeekSnaps(season, w)));
+  const recent = {};
+  res.forEach((r) => { if (r.status !== 'fulfilled') return;
+    for (const [id, v] of Object.entries(r.value)) (recent[id] ||= []).push(Math.round((v.snp / v.tm) * 100)); });
+  const today = await getWeekSnaps(season, week).catch(() => ({}));
+  if (!Object.keys(recent).length && !Object.keys(today).length) throw new Error('No snap counts available');
+  return { recent, today };
+}
+
 // Sleeper's trending list: adds/drops across Sleeper leagues in the last 24h.
 async function getTrending() {
   const [add, drop] = await Promise.all(['add', 'drop'].map((k) => get(`/players/nfl/trending/${k}?lookback_hours=24&limit=300`)));
@@ -481,6 +507,7 @@ function evalPlayer(id, ctx) {
     s: sp?.pts, e: espnAdj, opp: sp?.opp || game?.opp, noProj: !vals.length,
     teamWin: game?.winP ?? null, slStart: ctx.starts?.[id]?.st, espnStart: own?.st,
     startPct: ctx.starts?.[id]?.st ?? own?.st,          // Sleeper's "% start" first, ESPN's as fallback
+    snapRecent: ctx.snaps?.recent?.[id] || null, snapToday: ctx.snaps?.today?.[id] || null,
     adds: ctx.trend?.add?.[id] || 0, drops: ctx.trend?.drop?.[id] || 0 };
 }
 
@@ -638,12 +665,13 @@ async function openLeague(leagueId, week) {
       get(`/league/${leagueId}/matchups/${state.week}`), getPlayers(),
     ]);
     const season = state.nfl.season;
-    const [sp, es, gm, tr, ss] = await Promise.allSettled([
+    const [sp, es, gm, tr, ss, sn] = await Promise.allSettled([
       getSleeperProj(season, state.week, league.scoring_settings || {}),
       timeout(8000, getEspnProj(season, state.week)),
       timeout(8000, getGames(season, state.week)),
       timeout(8000, getTrending()),
       timeout(8000, getSleeperStarts(season, state.week)),
+      timeout(10000, getSnaps(season, state.week)),
     ]);
     if (leagueId !== state.leagueId) return;
     state.data = { league, rosters, users, matchups, players,
@@ -652,6 +680,7 @@ async function openLeague(leagueId, week) {
       games: gm.status === 'fulfilled' ? gm.value : null,
       trend: tr.status === 'fulfilled' ? tr.value : null,
       starts: ss.status === 'fulfilled' ? ss.value : null,
+      snaps: sn.status === 'fulfilled' ? sn.value : null,
       sleeperErr: sp.status === 'rejected' ? sp.reason.message : null,
       espnErr: es.status === 'rejected' ? es.reason.message : null, updated: new Date(), liveErr: false };
     render(state.data);
@@ -670,6 +699,9 @@ async function tick(leagueId, manual) {
     ]);
     if (leagueId !== state.leagueId) return;
     Object.assign(d, { matchups, games, updated: new Date(), liveErr: false });
+    if (d.snaps && Object.values(games || {}).some((g) => g.state === 'in')) {      // live snap counts during games
+      try { d.snaps.today = await getWeekSnaps(state.nfl.season, state.week); } catch (e) { /* keep the last counts */ }
+    }
     if (Date.now() - (state.playersAt || 0) > PLAYERS_TTL) {          // keep injury statuses and trends fresh
       try { d.players = await getPlayers(true); } catch (e) { /* keep the old list */ }
       try { d.trend = await getTrending(); } catch (e) { /* keep the old trends */ }
@@ -751,6 +783,17 @@ function scriptNote(p) {
   }
   return '';
 }
+const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+const snapShare = (p) => (p.snapRecent?.length ? Math.round(avg(p.snapRecent)) : null);
+function snapNote(p) {
+  if (['K', 'DEF'].includes(p.pos)) return '';
+  const parts = [];
+  const sh = snapShare(p);
+  if (sh != null) parts.push(`Plays ${sh}% of snaps (last ${p.snapRecent.length} game${p.snapRecent.length > 1 ? 's' : ''}: ${p.snapRecent.join(', ')}%)` + (sh < 40 ? ', so limited chances to score' : ''));
+  if (p.snapToday && (p.live || p.final)) parts.push(`Today ${p.snapToday.snp} snaps (${Math.round((p.snapToday.snp / p.snapToday.tm) * 100)}%)`);
+  return parts.join(' · ');
+}
+const snapShort = (p) => { const sh = snapShare(p); return sh == null || ['K', 'DEF'].includes(p.pos) ? null : `${sh}% snaps`; };
 const kfmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
 function crowdNote(p) {
   const parts = [];
@@ -846,7 +889,7 @@ function render(d) {
   const oppR = oppM && rosters.find((r) => r.roster_id === oppM.roster_id);
   const slots = league.roster_positions.filter((p) => !['BN', 'IR', 'TAXI'].includes(p));
   const scoring = league.scoring_settings || {};
-  const base = { players, sleeper, espn, espnOwn, trend, starts, scoring, games };
+  const base = { players, sleeper, espn, espnOwn, trend, starts, snaps: d.snaps, scoring, games };
   const ctxMine = { ...base, pts: myM?.players_points || {} };
   const ctxOpp = { ...base, pts: oppM?.players_points || {} };
   const ev = (id, c) => (id && id !== '0' ? evalPlayer(id, c) : null);
@@ -860,6 +903,7 @@ function render(d) {
     el('span', { class: 'src' + (espn ? ' ok' : ''), text: espn ? 'ESPN projections' : 'ESPN unavailable',
       title: espn ? null : `ESPN data could not be loaded${espnErr ? ' (' + espnErr + ')' : ''}. This is usually the browser blocking ESPN's unofficial API.` }),
     el('span', { class: 'src' + (games ? ' ok' : ''), text: games ? 'Live game status' : 'Game status unavailable' }),
+    el('span', { class: 'src' + (d.snaps ? ' ok' : ''), text: d.snaps ? 'Snap counts' : 'Snap counts unavailable', title: d.snaps ? null : "Sleeper's weekly stats (snap counts) couldn't be loaded." }),
     el('span', { class: 'src' + (starts ? ' ok' : ''), text: starts ? 'Sleeper start %' : 'Sleeper start % unavailable',
       title: starts ? null : (espnOwn ? "Sleeper's start % couldn't be loaded, so ESPN's is used instead." : 'No start % available from Sleeper or ESPN.') }),
     el('span', { class: 'src', text: scoringLabel(scoring) }));
@@ -979,6 +1023,7 @@ function render(d) {
   const where = (p) => (typeof p.slStart === 'number' ? 'Sleeper' : 'ESPN');
   for (const p of benchPool) if (!p.unavailable && !p.started && p.startPct >= 60) crowd.push(`${p.name} has ${Math.round(p.startPct)}% start on ${where(p)} but is on your bench.`);
   for (const p of myStart) if (!p.started && typeof p.startPct === 'number' && p.startPct <= 25) crowd.push(`Only ${Math.round(p.startPct)}% of ${where(p)} managers start ${p.name}.`);
+  for (const p of myStart) if (!p.started && snapShare(p) != null && snapShare(p) < 40 && !['K', 'DEF'].includes(p.pos)) crowd.push(`${p.name} has played only ${snapShare(p)}% of snaps lately, so fewer chances to score.`);
   for (const p of myStart) if (!p.started && p.drops >= 500) crowd.push(`${p.name} is among Sleeper's most-dropped players today (${kfmt(p.drops)} drops).`);
   for (const p of benchPool) if (!p.started && p.adds >= 500) crowd.push(`${p.name} is among Sleeper's most-added players today (${kfmt(p.adds)} adds).`);
   if (crowd.length) watchCard.append(el('div', { class: 'label', style: 'margin:14px 0 2px', text: 'Crowd check' }), ...crowd.slice(0, 5).map((t) => el('div', { class: 'ev', text: t })));
@@ -1043,12 +1088,13 @@ function render(d) {
       why = el('div', { class: 'hwhy' }, el('div', { class: 'why' }, swap && replaces[p.id] ? el('s', { text: `Instead of ${replaces[p.id].name}. ` }) : null,
         moved ? `Moves to ${SLOT_LABEL[s] || s} to make room. ` : null, sg.text));
       if (!p.started) [srcNote(p, !!espn), crowdNote(p)].forEach((t) => t && why.append(el('div', { class: 'pm', text: t })));
+      const snt = snapNote(p); if (snt) why.append(el('div', { class: 'pm' + (snapShare(p) < 40 ? ' lowsnap' : ''), text: snt }));
       const sn = scriptNote(p); if (sn) why.append(el('div', { class: 'pm', text: sn }));
     }
     row.append(el('span', { class: 'slot', text: SLOT_LABEL[s] || s }));
     if (!solo) row.append(o
       ? el('div', { class: 'side r' },
-          el('div', { class: 'who' }, el('div', { class: 'pn' }, el('span', { class: 'nmx', text: o.name }), o.final ? null : statusBadge(o)), el('div', { class: 'pm', text: metaOf(o) })),
+          el('div', { class: 'who' }, el('div', { class: 'pn' }, el('span', { class: 'nmx', text: o.name }), o.final ? null : statusBadge(o)), el('div', { class: 'pm', text: [metaOf(o), snapShort(o)].filter(Boolean).join(' · ') })),
           scoreCell(o))
       : el('div', { class: 'side r' }, el('div', { class: 'pm', text: 'Empty' })));
     if (why) row.append(why);
@@ -1074,6 +1120,7 @@ function render(d) {
       el('div', { class: 'pm', text: meta + (src ? ' · ' + src : '') }),
       el('div', { class: 'why' }, sg.text));
     if (!p.started && !p.unavailable) [srcNote(p, !!espn), crowdNote(p), scriptNote(p)].forEach((t) => t && left.append(el('div', { class: 'pm', text: t })));
+    if (!p.unavailable) { const snt = snapNote(p); if (snt) left.append(el('div', { class: 'pm' + (snapShare(p) < 40 ? ' lowsnap' : ''), text: snt })); }
     const right = scoreCell(p);
     myCol.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') }, el('span', { class: 'slot', text: p.pos || '-' }), left, right));
   });
@@ -1087,7 +1134,7 @@ function render(d) {
       theirCol.append(el('div', { class: 'row' + (i === 0 ? ' first' : '') }, el('span', { class: 'slot', text: p.pos || '-' }),
         el('div', {},
           el('div', { class: 'pn' }, p.name, p.final ? null : statusBadge(p)),
-          el('div', { class: 'pm', text: metaOf(p) }),
+          el('div', { class: 'pm', text: [metaOf(p), snapShort(p)].filter(Boolean).join(' · ') }),
           worse ? el('div', { class: 'why', text: 'Projects more than one of their starters. Watch for a lineup change.' }) : null),
         scoreCell(p)));
     });
@@ -1102,7 +1149,7 @@ function render(d) {
     el('p', { text: "Live: for a player whose game is under way, the estimate is their points so far plus the projection for the rest of the game. Finished games are locked in. Your win chance compares both teams' estimated finals, and refreshes about every 45 seconds." }),
     el('p', { text: 'Players whose games have started cannot be moved, so suggestions only involve players who have not played yet. Out/IR players are skipped, and Doubtful players are discounted. Estimates only; check injuries before kickoff.' }),
     el('p', { text: "Watch compares each refresh with the last one and logs injury status changes (yours and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. Injury statuses refresh about every 30 minutes. Alerts only work while this page is open in a tab; it keeps checking in the background when alerts are on." }),
-    el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
+    el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Snap share is the player's share of their team's offensive snaps over the last 3 games, from Sleeper's weekly stats; under 40% is flagged. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
   view.append(lower);
 }
 

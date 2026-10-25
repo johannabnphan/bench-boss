@@ -14,6 +14,7 @@ The whole app is a single `index.html`, with no build step.
 - **Watches your matchup.** A floating Watch button opens a pop-up that logs injury status changes (for your players and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. The button shows how many new alerts you have, and you can turn on browser alerts for these.
 - **Shows a crowd check.** Each player shows the "% start" figure from Sleeper (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add and drop counts. The Watch pop-up flags bench players most managers start and starters few managers start.
 - **Shows the games that decide your matchup.** For each NFL game, the Watch pop-up shows how many projected points you and your opponent have left in it, the betting favorite or live win chance, and when your players face your opponent's defense.
+- **Shows snap share.** Each player shows the share of their team's offensive snaps they played over the last 3 games, plus today's snap count during games. Players under 40% are flagged because they get fewer chances to score.
 - **Shows a Predicted winner line.** This line names the team expected to win the matchup, and by how much, using the combined Sleeper and ESPN projections.
 
 ## How it works
@@ -27,7 +28,7 @@ The whole app is a single `index.html`, with no build step.
 - **Watch and alerts:** each refresh is compared with the last one stored in your browser for that league and week. The first visit to a week only records a starting point. Alerts only work while the page is open in a tab; it keeps checking in a background tab when alerts are on. Some mobile browsers only allow alerts from installed apps.
 - **Status chips:** chips show whether Sleeper projections, ESPN projections, live game status and Sleeper start % loaded. When a source fails, its chip's hover text explains why.
 
-Note: Sleeper's projections and "% start" endpoints are unofficial and may change.
+Note: Sleeper's projections, "% start" and weekly stats (snap counts) endpoints are unofficial and may change.
 
 ## Disclaimer
 
