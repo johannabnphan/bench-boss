@@ -210,8 +210,6 @@
   .hero input + input { flex-basis: 160px; }
 
   /* team analyzer + trades */
-  .hdr-r { display: flex; align-items: center; gap: 8px; }
-  #tradesBtn { padding: 7px 14px; font-size: 13px; background: var(--card); color: var(--brown); }
   .page-h { margin: 0 0 16px; }
   .page-h h1 { font-family: var(--serif); font-weight: 600; font-size: 28px; color: var(--brown); margin: 0 0 2px; letter-spacing: -.01em; }
   .posgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
@@ -318,8 +316,7 @@
       </svg>
       <span>Bench Boss</span>
     </div>
-    <div class="hdr-r"><button id="tradesBtn" class="pill hidden" type="button">Trades</button>
-    <div id="userChip" class="chip hidden"><span id="userName"></span><button id="switchBtn" type="button">Switch</button></div></div>
+    <div id="userChip" class="chip hidden"><span id="userName"></span><button id="switchBtn" type="button">Switch</button></div>
   </header>
 
   <section id="connect" class="hero">
@@ -754,7 +751,6 @@ function enterApp() {
   renderTabs();
   openLeague(state.leagues[0].league_id);
 }
-$('tradesBtn').addEventListener('click', () => { location.hash = onTrades() ? '' : '#trades'; });
 addEventListener('hashchange', () => { if (state.data) { render(state.data); scrollTo({ top: 0 }); } });
 $('watchBtn').addEventListener('click', () => {
   store($('watchBtn').dataset.seen, Date.now());
@@ -765,7 +761,7 @@ $('watchClose').addEventListener('click', () => $('watchDlg').close());
 $('watchDlg').addEventListener('click', (e) => { if (e.target === $('watchDlg')) $('watchDlg').close(); });   // tap outside to close
 $('switchBtn').addEventListener('click', () => {
   stopPoll();
-  $('watchBtn').classList.add('hidden'); $('tradesBtn').classList.add('hidden');
+  $('watchBtn').classList.add('hidden');
   $('connect').classList.remove('hidden');
   ['tabs', 'leagueView', 'userChip'].forEach((id) => $(id).classList.add('hidden'));
   $('username').focus();
@@ -1072,9 +1068,16 @@ state.view = load('bb_view') === 'league' ? 'league' : 'mine';
 // Trades is its own page (#trades), separate from the matchup views.
 const onTrades = () => location.hash === '#trades';
 function viewSwitch() {
-  const b = (key, label) => el('button', { type: 'button', class: 'seg-b' + (state.view === key ? ' on' : ''), 'aria-pressed': String(state.view === key), text: label,
-    onclick: () => { if (state.view === key) return; state.view = key; store('bb_view', key); render(state.data); scrollTo({ top: 0, behavior: 'smooth' }); } });
-  return el('div', { class: 'seg' }, b('mine', 'My matchup'), b('league', 'Whole league'));
+  const active = onTrades() ? 'trades' : state.view;
+  const b = (key, label) => el('button', { type: 'button', class: 'seg-b' + (active === key ? ' on' : ''), 'aria-pressed': String(active === key), text: label,
+    onclick: () => {
+      if (active === key) return;
+      if (key === 'trades') { location.hash = '#trades'; return; }        // Trades is its own page
+      state.view = key; store('bb_view', key);
+      if (onTrades()) history.pushState(null, '', location.pathname + location.search);   // leave the Trades page
+      render(state.data); scrollTo({ top: 0, behavior: 'smooth' });
+    } });
+  return el('div', { class: 'seg' }, b('mine', 'My matchup'), b('league', 'Whole league'), b('trades', 'Trades'));
 }
 
 // Every matchup in the league this week on one page, with standings.
@@ -1533,10 +1536,8 @@ function render(d) {
     el('p', { text: "Watch compares each refresh with the last one and logs injury status changes (yours and your opponent's starters), players who become worth starting, win-chance swings of 10 points or more, and live blowouts. Injury statuses refresh about every 30 minutes. Alerts only work while this page is open in a tab; it keeps checking in the background when alerts are on." }),
     el('p', { text: "Crowd check uses the \"% start\" Sleeper shows for each player (ESPN's start rate when Sleeper's isn't available), plus Sleeper's 24-hour add/drop trends. Snap share is the player's share of their team's offensive snaps over the last 3 games, from Sleeper's weekly stats; under 40% is flagged. Roles (WR1, WR2…) rank teammates at the same position by recent snap share, using Sleeper's depth chart where snaps are missing. When a teammate who plays a real role is out or doubtful, the player is flagged for more opportunity; this is a note, not a projection change, because Sleeper and ESPN already adjust for announced injuries. Game notes use ESPN's betting line before kickoff and its live win probability during games: teams that fall behind tend to pass more and run less." }))));
   view.append(lower);
-  $('tradesBtn').classList.remove('hidden');
-  $('tradesBtn').textContent = onTrades() ? '← Lineup' : 'Trades';
   $('watchBtn').classList.toggle('hidden', onTrades());
-  if (onTrades()) view.replaceChildren(el('div', { class: 'page-h' }, el('h1', { text: 'Trade analyzer' }),
+  if (onTrades()) view.replaceChildren(viewSwitch(), el('div', { class: 'page-h' }, el('h1', { text: 'Trade analyzer' }),
     el('p', { class: 'pm', text: `${league.name || 'Your league'} · based on what your team needs` })), teamAnalyzer(d, { slots, mine }));
   else if (state.view === 'league') view.replaceChildren(viewSwitch(), leagueOverview(d, { base, ev, slots, wk, srcs, mine, tidx }));
   else view.prepend(viewSwitch());
